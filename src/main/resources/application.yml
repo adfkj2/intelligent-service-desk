@@ -4,7 +4,18 @@ server:
 spring:
   application:
     name: isd
+  profiles:
+    active: local
+  datasource:
+    url: "jdbc:mysql://127.0.0.1:3306/isd?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
+    username: root
+    password: ${DB_PASSWORD:}
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
 
 logging:
   level:
     root: INFO
+    com.isd: DEBUG
