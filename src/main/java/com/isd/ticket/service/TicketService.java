@@ -2,6 +2,8 @@ package com.isd.ticket.service;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 import com.isd.common.exception.BusinessException;
@@ -18,6 +20,7 @@ public class TicketService {
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.BASIC_ISO_DATE;
     private static final String DEFAULT_PRIORITY = "MEDIUM";
     private static final String INITIAL_STATUS = "OPEN";
+    private static final Set<String> ALLOWED_STATUSES = Set.of("OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED");
 
     private final TicketMapper ticketMapper;
 
@@ -49,6 +52,22 @@ public class TicketService {
     public Ticket getById(Long id) {
         return ticketMapper.findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "工单不存在: id=" + id));
+    }
+
+    /**
+     * 按状态统计工单数。
+     * 为什么要在这里校验 status：这是一个"只允许有限取值"的参数，
+     * 不校验就会出现 countByStatus("'; drop table ...") 这类输入被当作普通字符串去查（MyBatis 用 ? 占位符，
+     * 注入风险已被挡住，但拼错的业务值会静默返回 0，调用方无法区分"没有数据"和"参数错了"）。
+     */
+    @Transactional(readOnly = true)
+    public long countByStatus(String status) {
+        String normalized = status == null ? "" : status.trim().toUpperCase(Locale.ROOT);
+        if (!ALLOWED_STATUSES.contains(normalized)) {
+            throw new BusinessException(ErrorCode.INVALID_PARAM,
+                    "非法状态: " + status + "，允许值: " + ALLOWED_STATUSES);
+        }
+        return ticketMapper.countByStatus(normalized);
     }
 
     /**

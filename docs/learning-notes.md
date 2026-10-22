@@ -111,3 +111,99 @@ GET /api/tickets/sample    → 200 {"id":1,"ticketNo":"T20261020-0001","title":"
 - `@ExceptionHandler` 多个匹配时的优先级（继承关系越近越优先）
 - `@Transactional` 默认只回滚 `RuntimeException`，受检异常需 `rollbackFor`
 
+---
+
+## 2026-10-22 · 四个必须彻底搞懂的原理（附实测证据）
+
+### 一、Mapper 接口没有实现，为什么能注入、能调用
+
+**是什么**：Spring 容器里放的不是 `TicketMapper` 的实现类，而是一个 **JDK 动态代理对象**，它实现了 `TicketMapper` 接口。
+
+**实测证据**（临时探针跑出来的）：
+```
+PROBE_mapper_class=jdk.proxy2.$Proxy82      ← JDK 动态代理
+PROBE_mapper_is_jdk_proxy=true
+PROBE_service_class=com.isd.ticket.service.TicketService$$SpringCGLIB$$0   ← CGLIB 代理
+PROBE_service_is_cglib=true
+```
+
+**完整链路（7 步）**：
+1. `@SpringBootApplication` = `@SpringBootConfiguration` + `@EnableAutoConfiguration` + `@ComponentScan`；
+2. `@EnableAutoConfiguration` 读取 classpath 上各 jar 的 `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`，
+   我们引入的 `mybatis-spring-boot-starter` 里就登记了 `MybatisAutoConfiguration`；
+3. `MybatisAutoConfiguration` 上有条件注解：`@ConditionalOnClass(SqlSessionFactory.class)`、`@ConditionalOnSingleCandidate(DataSource.class)`。
+   —— 这就是"为什么加了 starter 就自动生效、没配数据源就报错"的原因；
+4. 它创建两个核心 Bean：`SqlSessionFactory`（读 `mybatis.*` 配置）和 `SqlSessionTemplate`；
+5. 扫描 `@Mapper` 接口（`AutoConfiguredMapperScannerRegistrar`，或用 `@MapperScan` 指定包），
+   把每个接口注册成 `MapperFactoryBean`；
+6. `MapperFactoryBean.getObject()` 返回 `SqlSessionTemplate.getMapper(接口.class)` 生成的代理对象；
+7. 调用 `ticketMapper.findById(1L)` 时，代理拦截 → `MapperMethod.execute()` → 按 `@Select` 找到 SQL →
+   用 `?` 占位符绑定参数 → JDBC 执行 → 结果按 `map-underscore-to-camel-case` 映射成对象。
+
+**为什么这么设计**：接口无法 new，框架用代理统一完成"参数→SQL、结果集→对象"，否则每个 Mapper 都要手写实现类。
+
+---
+
+### 二、`@Transactional` 的自调用陷阱
+
+**是什么**：`@Transactional` 靠 **AOP 代理**实现。容器里注入的 `TicketService` 是 `TicketService$$SpringCGLIB$$0`（上面已实测），
+真正的业务对象被它包在里面。只有**从代理进入**的方法调用才会被事务拦截器处理。
+
+**为什么自调用会失效**：
+```
+外部调用 → 代理.create() → 开启事务 → target.create() → this.getById()   ← 直接调用目标对象自己
+                                                            ↑ 不经过代理，getById 上的注解不生效
+```
+- `create` 的事务是生效的（它从代理进入）；
+- 在 `create` 内部调用 `this.getById()` 时，`getById` 上的 `@Transactional(readOnly = true)` 或 `REQUIRES_NEW` **都不会生效**，
+  它仍在 `create` 的事务里。如果你以为"它是新事务"，就会出现"该回滚的没回滚"。
+
+**怎么修（三选一）**：
+1. **拆 Bean（推荐）**：把查询方法放到 `TicketQueryService`，通过注入调用 → 走代理；
+2. 注入自身代理：`@Lazy TicketService self`，用 `self.getById()`；或 `AopContext.currentProxy()`（需 `@EnableAspectJAutoProxy(exposeProxy = true)`）；
+3. 用 `TransactionTemplate` 编程式控制。
+
+**怎么验证**：在 `getById` 里打印 `TransactionSynchronizationManager.getCurrentTransactionName()`；
+外部调用会看到 `...TicketService.getById`，自调用看到的仍是 `...create`。
+
+---
+
+### 三、`code` 与 HTTP 状态码的边界
+
+| 层 | 谁在看 | 作用 |
+|---|---|---|
+| HTTP 状态码 | 网关、负载均衡、监控、CDN、浏览器、axios 拦截器 | 传输层语义：成功/未认证/无权限/不存在/冲突/服务端故障 |
+| body 的 `code` | 业务前端、客服排障 | 业务语义细分：40400 工单不存在、40901 工单已被他人接单 |
+
+**如果全部返回 200**：监控里 5xx 率永远是 0，告警不响；网关无法按状态重试；错误响应可能被缓存。
+**如果只有 HTTP 状态没有 code**：前端只能匹配 message 文本，改一个字就崩。
+
+**一个具体陷阱**：把成功数据塞进 `ApiResponse.error(...)`（data 恒为 null），
+表现是"HTTP 200、code 也是 0、但 data 拿不到"——这是最难查的一类 bug，因为链路每层都没报错。
+
+---
+
+### 四、`Duplicate entry 'T20261022-6044' for key 'uk_ticket_no'` 的根因
+
+**根因**：单号 = 日期 + 四位随机数（1000–9999，共 9000 个取值）。同一天的单号是"从 9000 个格子里抽签"，
+按生日悖论，冲突概率约为 `1 - e^(-n²/18000)`：
+
+| 当天工单数 | 冲突概率 |
+|---|---|
+| 20 | ≈ 2% |
+| 50 | ≈ 13% |
+| 100 | ≈ 42% |
+
+也就是说，**一天几十单就足够撞**，与并发无关；并发只是让它更早暴露。
+
+**修复方案与代价**：
+
+| 方案 | 做法 | 代价 |
+|---|---|---|
+| 应用层重试（最小改动） | 捕获 `DuplicateKeyException`，重新生成后重试 ≤3 次 | 延迟抖动；必须确保插入失败无副作用（本例安全） |
+| 换生成策略（长期正确） | 雪花算法 / Redis `INCR` / 数据库序列表 | 雪花要处理时钟回拨；Redis 引入外部依赖 |
+| 用主键派生（务实） | 单号 = `T` + 日期 + 自增 id，插入后回填 | 多一次 UPDATE，但绝不冲突 |
+
+**唯一索引必须保留**：它是最后一道防线，应用层重试和索引是"双保险"而不是"二选一"。
+
+

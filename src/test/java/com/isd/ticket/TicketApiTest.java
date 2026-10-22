@@ -113,4 +113,27 @@ class TicketApiTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(40000));
     }
+
+    @Test
+    @DisplayName("按状态统计：小写入参被规范化，返回计数")
+    void statsWithValidStatus() throws Exception {
+        mockMvc.perform(post("/api/tickets").contentType(MediaType.APPLICATION_JSON).content(VALID_BODY))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/api/tickets").contentType(MediaType.APPLICATION_JSON).content(VALID_BODY))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/api/tickets/stats/{status}", "open"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.status").value("OPEN"))
+                .andExpect(jsonPath("$.data.count").value(Matchers.greaterThanOrEqualTo(2)));
+    }
+
+    @Test
+    @DisplayName("按状态统计：非法状态返回 400")
+    void statsWithIllegalStatus() throws Exception {
+        mockMvc.perform(get("/api/tickets/stats/{status}", "NOT_A_STATUS"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40000));
+    }
 }

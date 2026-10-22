@@ -30,4 +30,7 @@ public interface TicketMapper {
             WHERE id = #{id}
             """)
     Optional<Ticket> findById(@Param("id") Long id);
+
+    @Select("SELECT COUNT(*) FROM ticket WHERE status = #{status}")
+    long countByStatus(@Param("status") String status);
 }

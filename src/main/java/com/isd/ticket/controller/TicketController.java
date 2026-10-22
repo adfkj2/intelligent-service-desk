@@ -5,6 +5,9 @@ import com.isd.ticket.dto.CreateTicketRequest;
 import com.isd.ticket.entity.Ticket;
 import com.isd.ticket.service.TicketService;
 import jakarta.validation.Valid;
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -39,5 +42,18 @@ public class TicketController {
     @GetMapping("/{id}")
     public ApiResponse<Ticket> getById(@PathVariable Long id) {
         return ApiResponse.ok(ticketService.getById(id));
+    }
+
+    /**
+     * 注意路径设计：/stats/{status} 是两段，不会和 /{id} 的单段模板冲突。
+     * 如果写成 /stats 用查询参数，好处是 URL 语义更"列表化"，坏处是状态值变成了可选项，校验要另写。
+     */
+    @GetMapping("/stats/{status}")
+    public ApiResponse<Map<String, Object>> statsByStatus(@PathVariable String status) {
+        long count = ticketService.countByStatus(status);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("status", status.toUpperCase(Locale.ROOT));
+        data.put("count", count);
+        return ApiResponse.ok(data);
     }
 }
