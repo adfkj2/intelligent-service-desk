@@ -57,3 +57,57 @@ GET /api/tickets/sample    → 200 {"id":1,"ticketNo":"T20261020-0001","title":"
 - 为什么 `LinkedHashMap` 能保证 JSON 字段顺序，而 `Map.of` 不能（后者是不可变哈希表，迭代顺序不保证）
 - `@RequestMapping("/api")` 类级前缀 + `@GetMapping("/tickets/sample")` 方法级路径 = `/api/tickets/sample`
 - `@RestController` 与 `@Controller` 的区别（有没有 `@ResponseBody`）
+
+---
+
+## 2026-10-22 · P1-3 统一响应、全局异常与集成测试
+
+### 1. 统一响应结构（为什么不是"永远返回 HTTP 200"）
+
+```json
+{"code": 0, "message": "OK", "data": {...}}
+```
+
+- **保留 HTTP 状态码语义**（201/400/404/409/500），body 里再给业务码 `code`：
+  网关限流、监控告警、前端 axios 拦截器都能按 HTTP 状态统一处理，不需要解析业务码。
+- **反面做法**：全部返回 200，用 body 里的 `code` 区分成败。优点是前端只处理一种"成功"分支；
+  缺点是监控看不出错误率、CDN/网关无法按状态分类、缓存语义错乱。**小项目可接受，对外 API 不建议。**
+- `code` 规定：0 = 成功；4xxxx = 客户端侧错误；5xxxx = 服务端错误。
+
+### 2. 异常 → 响应的映射表
+
+| 异常 | HTTP | code | 触发场景 |
+|---|---|---|---|
+| `BusinessException` | 随错误码（404/409…） | 40400 等 | Service 主动拒绝：工单不存在、状态非法 |
+| `MethodArgumentNotValidException` | 400 | 40000 | `@Valid` 字段校验失败 |
+| `MethodArgumentTypeMismatchException` | 400 | 40000 | 路径参数类型错，如 `/tickets/abc` |
+| `HttpMessageNotReadableException` | 400 | 40000 | 请求体不是合法 JSON |
+| `NoResourceFoundException` | 404 | 40400 | 访问不存在的路径 |
+| `Exception`（兜底） | 500 | 50000 | 未预期异常，只记日志，不把堆栈返回给调用方 |
+
+**关键原则**：异常信息对外"最小够用"，完整堆栈只进服务端日志——否则等于把内部结构告诉攻击者。
+
+### 3. 测试策略
+
+```java
+@SpringBootTest            // 起完整容器（真实 MyBatis + MySQL）
+@AutoConfigureMockMvc      // 不启动 Tomcat，直接走 DispatcherServlet
+@Transactional             // 每个测试结束后回滚
+```
+
+- `MockMvc` 比 curl 快，且能断言状态码、JSON 路径、错误消息；
+- `@Transactional` 让测试数据自动回滚——实测：跑完 6 个用例后库里行数没有增加（自增 id 会跳动，属正常）；
+- 断言要覆盖**失败路径**：400 字段校验、404 业务不存在、400 类型转换。只测成功路径等于没测。
+
+### 4. 本轮踩的坑
+
+1. **`mvn test` 不会重新打包 jar**：改完代码只跑测试，`target/*.jar` 仍是旧产物，启动后行为还是老版本。
+   正确顺序：`mvn package`（含测试）→ 跑 jar。区分"编译通过 / 测试通过 / 交付物已更新"三件事。
+2. 改了返回结构后，`/api/ping` 也要跟着改——**统一响应必须全站一致**，留一个"裸 Map"接口就等于留了个坑。
+
+### 5. 待复习
+
+- `@RestControllerAdvice` 为什么能捕获 Controller 抛出的异常（`HandlerExceptionResolver` 链路）
+- `@ExceptionHandler` 多个匹配时的优先级（继承关系越近越优先）
+- `@Transactional` 默认只回滚 `RuntimeException`，受检异常需 `rollbackFor`
+

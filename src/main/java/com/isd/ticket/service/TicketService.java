@@ -2,9 +2,10 @@ package com.isd.ticket.service;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 
+import com.isd.common.exception.BusinessException;
+import com.isd.common.exception.ErrorCode;
 import com.isd.ticket.dto.CreateTicketRequest;
 import com.isd.ticket.entity.Ticket;
 import com.isd.ticket.mapper.TicketMapper;
@@ -45,8 +46,9 @@ public class TicketService {
     }
 
     @Transactional(readOnly = true)
-    public Optional<Ticket> findById(Long id) {
-        return ticketMapper.findById(id);
+    public Ticket getById(Long id) {
+        return ticketMapper.findById(id)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "工单不存在: id=" + id));
     }
 
     /**
