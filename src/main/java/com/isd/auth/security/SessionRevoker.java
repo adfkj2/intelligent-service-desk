@@ -1,5 +1,6 @@
 package com.isd.auth.security;
 
+import com.isd.common.metrics.IsdMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.core.session.SessionInformation;
@@ -22,22 +23,24 @@ public class SessionRevoker {
     private static final Logger log = LoggerFactory.getLogger(SessionRevoker.class);
 
     private final SessionRegistry sessionRegistry;
+    private final IsdMetrics metrics;
 
-    public SessionRevoker(SessionRegistry sessionRegistry) {
+    public SessionRevoker(SessionRegistry sessionRegistry, IsdMetrics metrics) {
         this.sessionRegistry = sessionRegistry;
+        this.metrics = metrics;
     }
 
     /** 失效某个用户的全部会话（重置密码时用） */
     public int revokeAll(Long userId) {
-        return revoke(userId, null);
+        return revoke(userId, null, "password_reset");
     }
 
     /** 失效某个用户除当前会话外的其他会话（本人改密时用） */
     public int revokeOthers(Long userId, String currentSessionId) {
-        return revoke(userId, currentSessionId);
+        return revoke(userId, currentSessionId, "password_changed");
     }
 
-    private int revoke(Long userId, String keepSessionId) {
+    private int revoke(Long userId, String keepSessionId, String reason) {
         int revoked = 0;
         for (Object principal : sessionRegistry.getAllPrincipals()) {
             if (!(principal instanceof LoginUser loginUser) || !loginUser.getId().equals(userId)) {
@@ -52,8 +55,9 @@ public class SessionRevoker {
             }
         }
         if (revoked > 0) {
-            log.info("会话失效: userId={} sessions={}", userId, revoked);
+            log.info("会话失效: userId={} sessions={} reason={}", userId, revoked, reason);
         }
+        metrics.recordSessionRevoked(reason, revoked);
         return revoked;
     }
 }

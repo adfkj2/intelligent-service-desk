@@ -16,6 +16,8 @@ import com.isd.support.AbstractIntegrationTest;
 import com.isd.support.TestUsers;
 import com.isd.ticket.dto.CreateTicketRequest;
 import com.isd.ticket.service.TicketService;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -56,6 +58,9 @@ class AiToolsTest extends AbstractIntegrationTest {
     @Autowired
     private KbItemMapper itemMapper;
 
+    @Autowired
+    private MeterRegistry meterRegistry;
+
     @AfterEach
     void clearSecurityContext() {
         SecurityContextHolder.clearContext();
@@ -89,10 +94,14 @@ class AiToolsTest extends AbstractIntegrationTest {
     @DisplayName("工单工具：没有登录上下文时直接失败，不会退化成查全表")
     void ticketToolRequiresLogin() {
         SecurityContextHolder.clearContext();
+        double errorsBefore = toolCallCount("query_my_tickets", "error");
 
         assertThatThrownBy(() -> ticketTools.queryMyTickets(null, 5))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("未登录");
+
+        // 工具失败必须被单独统计：端到端 chat 指标看不出来（异常会被框架交给模型）
+        assertThat(toolCallCount("query_my_tickets", "error")).isEqualTo(errorsBefore + 1);
     }
 
     @Test
@@ -110,11 +119,26 @@ class AiToolsTest extends AbstractIntegrationTest {
         item.setCreatedBy(1L);
         itemMapper.insert(item);
 
+        double successBefore = toolCallCount("search_knowledge_base", "success");
+        double emptyBefore = toolCallCount("search_knowledge_base", "empty");
+
         assertThat(knowledgeTools.searchKnowledgeBase("打印机"))
                 .extracting(KbBrief::title)
                 .contains("打印机无法连接");
 
         assertThat(knowledgeTools.searchKnowledgeBase("  ")).isEmpty();
+
+        assertThat(toolCallCount("search_knowledge_base", "success")).isEqualTo(successBefore + 1);
+        assertThat(toolCallCount("search_knowledge_base", "empty")).isEqualTo(emptyBefore + 1);
+    }
+
+    /** 工具指标是 Timer：count 就是调用次数 */
+    private double toolCallCount(String tool, String result) {
+        Timer timer = meterRegistry.find("isd.ai.tool.calls")
+                .tag("tool", tool)
+                .tag("result", result)
+                .timer();
+        return timer == null ? 0 : timer.count();
     }
 
     private void loginAs(LoginUser user) {

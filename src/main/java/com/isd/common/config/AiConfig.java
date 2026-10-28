@@ -1,14 +1,15 @@
 package com.isd.common.config;
 
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 
 import com.isd.ai.tools.KnowledgeTools;
 import com.isd.ai.tools.TicketTools;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.binder.jvm.ExecutorServiceMetrics;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.security.concurrent.DelegatingSecurityContextExecutorService;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 /**
  * AI 相关 Bean：线程池 + ChatClient（系统提示词与工具在这里一次性挂上）。
@@ -35,19 +36,27 @@ public class AiConfig {
     /**
      * LLM 调用线程池。
      *
-     * 关键点：把调用丢到另一个线程后，SecurityContext 默认不会跟着过去（ThreadLocal 不继承），
-     * 工具里的 CurrentUserProvider 会认为"未登录"。
-     * 用 DelegatingSecurityContextExecutorService 包装后，提交任务时会捕获当前上下文、
-     * 在任务线程中恢复，工具仍然能以真实登录身份查询。
+     * 关键点：把调用丢到另一个线程后，SecurityContext 与 MDC 都不会跟着过去（ThreadLocal 不继承）。
+     * 前者会让工具里的 CurrentUserProvider 认为"未登录"，后者会让 AI 那几行日志丢掉 traceId。
+     * 用 ThreadPoolTaskExecutor + TaskDecorator 一次解决两件事；
+     * 顺带用 ExecutorServiceMetrics 暴露队列长度与活跃线程数——AI 排队时能直接看出来。
+     *
+     * 拒绝策略用 CallerRuns：AI 是只读查询，队列满了由调用线程自己跑，慢一点好过直接 500。
      */
     @Bean(name = "aiExecutor", destroyMethod = "shutdown")
-    public ExecutorService aiExecutor() {
-        ExecutorService raw = Executors.newFixedThreadPool(4, runnable -> {
-            Thread thread = new Thread(runnable, "ai-call");
-            thread.setDaemon(true);
-            return thread;
-        });
-        return new DelegatingSecurityContextExecutorService(raw);
+    public ThreadPoolTaskExecutor aiExecutor(MeterRegistry meterRegistry) {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(50);
+        executor.setThreadNamePrefix("ai-call-");
+        executor.setDaemon(true);
+        executor.setTaskDecorator(new ContextPropagatingTaskDecorator());
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(false);
+        executor.initialize();
+        ExecutorServiceMetrics.monitor(meterRegistry, executor.getThreadPoolExecutor(), "isd.ai.executor");
+        return executor;
     }
 
     @Bean

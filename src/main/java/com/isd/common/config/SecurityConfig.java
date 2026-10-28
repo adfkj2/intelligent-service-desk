@@ -4,6 +4,7 @@ import java.io.IOException;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.isd.common.exception.ErrorCode;
+import com.isd.common.metrics.IsdMetrics;
 import com.isd.common.result.ApiResponse;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.boot.web.servlet.ServletListenerRegistrationBean;
@@ -72,7 +73,8 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
                                                    SecurityContextRepository securityContextRepository,
                                                    ObjectMapper objectMapper,
-                                                   SessionRegistry sessionRegistry) throws Exception {
+                                                   SessionRegistry sessionRegistry,
+                                                   IsdMetrics metrics) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
@@ -94,6 +96,12 @@ public class SecurityConfig {
                         // 登录页“忘记密码”需要未登录也能读取管理员联系方式
                         .requestMatchers(HttpMethod.GET, "/api/auth/admin-contacts").permitAll()
                         .requestMatchers("/api/ping", "/error").permitAll()
+                        /*
+                         * Actuator 端点只映射在管理端口 8082（且绑 127.0.0.1）：Spring Security
+                         * 的过滤器链同样作用于该端口，不放行的话 Prometheus 抓取会拿到 401。
+                         * 8081 上没有这些端点，放行后访问落到 404，不会泄漏任何信息。
+                         */
+                        .requestMatchers("/actuator/**").permitAll()
                         // 接口文档放行：生产环境应改为仅内网/IP 白名单可见
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         /*
@@ -109,9 +117,11 @@ public class SecurityConfig {
                         .authenticationEntryPoint((request, response, ex) ->
                                 writeJson(response, ErrorCode.UNAUTHORIZED, objectMapper,
                                         "未登录或会话已失效，请先登录"))
-                        .accessDeniedHandler((request, response, ex) ->
-                                writeJson(response, ErrorCode.FORBIDDEN, objectMapper,
-                                        "无权访问该资源")));
+                        .accessDeniedHandler((request, response, ex) -> {
+                            // URL 规则拦下的越权（如员工访问 /api/admin/**），是最常见的探测信号
+                            metrics.recordForbidden("url");
+                            writeJson(response, ErrorCode.FORBIDDEN, objectMapper, "无权访问该资源");
+                        }));
         return http.build();
     }
 

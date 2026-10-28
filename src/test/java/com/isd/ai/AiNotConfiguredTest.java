@@ -4,6 +4,8 @@ import com.isd.ai.client.LlmClient;
 import com.isd.auth.security.LoginUser;
 import com.isd.support.AbstractIntegrationTest;
 import com.isd.support.TestUsers;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,6 +15,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
@@ -42,9 +45,14 @@ class AiNotConfiguredTest extends AbstractIntegrationTest {
     @MockitoBean
     private LlmClient llmClient;
 
+    @Autowired
+    private MeterRegistry meterRegistry;
+
     @Test
     @DisplayName("未配置 Key：直接降级，且完全不发起模型调用")
     void missingKeyFallsBackWithoutCallingLlm() throws Exception {
+        double notConfiguredBefore = aiChatCount("not_configured");
+
         mockMvc.perform(post("/api/ai/chat").with(user(EMPLOYEE))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -56,5 +64,11 @@ class AiNotConfiguredTest extends AbstractIntegrationTest {
 
         // 关键断言：没有 Key 就不该有任何出网尝试，而不是调用了再靠异常兜底
         verifyNoInteractions(llmClient);
+        assertThat(aiChatCount("not_configured")).isEqualTo(notConfiguredBefore + 1);
+    }
+
+    private double aiChatCount(String result) {
+        Timer timer = meterRegistry.find("isd.ai.chat").tag("result", result).timer();
+        return timer == null ? 0 : timer.count();
     }
 }

@@ -5,6 +5,7 @@ import java.util.List;
 import com.isd.ai.dto.TicketBrief;
 import com.isd.auth.security.CurrentUserProvider;
 import com.isd.auth.security.LoginUser;
+import com.isd.common.metrics.IsdMetrics;
 import com.isd.ticket.service.TicketService;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
@@ -25,13 +26,16 @@ public class TicketTools {
 
     private static final int DEFAULT_LIMIT = 5;
     private static final int MAX_LIMIT = 20;
+    private static final String TOOL_NAME = "query_my_tickets";
 
     private final TicketService ticketService;
     private final CurrentUserProvider currentUserProvider;
+    private final IsdMetrics metrics;
 
-    public TicketTools(TicketService ticketService, CurrentUserProvider currentUserProvider) {
+    public TicketTools(TicketService ticketService, CurrentUserProvider currentUserProvider, IsdMetrics metrics) {
         this.ticketService = ticketService;
         this.currentUserProvider = currentUserProvider;
+        this.metrics = metrics;
     }
 
     @Tool(name = "query_my_tickets",
@@ -43,12 +47,23 @@ public class TicketTools {
                     required = false) String status,
             @ToolParam(description = "返回条数上限，默认 5，最大 20", required = false) Integer limit) {
 
-        LoginUser operator = currentUserProvider.require();
-        int size = limit == null ? DEFAULT_LIMIT : Math.min(Math.max(limit, 1), MAX_LIMIT);
-        return ticketService.list(status, null, null, 1, size, operator)
-                .items()
-                .stream()
-                .map(TicketBrief::from)
-                .toList();
+        long startNanos = System.nanoTime();
+        try {
+            LoginUser operator = currentUserProvider.require();
+            int size = limit == null ? DEFAULT_LIMIT : Math.min(Math.max(limit, 1), MAX_LIMIT);
+            List<TicketBrief> rows = ticketService.list(status, null, null, 1, size, operator)
+                    .items()
+                    .stream()
+                    .map(TicketBrief::from)
+                    .toList();
+            metrics.recordToolCall(TOOL_NAME,
+                    rows.isEmpty() ? IsdMetrics.TOOL_EMPTY : IsdMetrics.TOOL_SUCCESS, startNanos);
+            return rows;
+        } catch (RuntimeException ex) {
+            // 埋点不能改变行为：异常必须原样抛出。
+            // 一旦吞掉，Spring AI 会把"未登录/参数非法"当成"没有数据"喂给模型，用户看到的和真没数据一样。
+            metrics.recordToolCall(TOOL_NAME, IsdMetrics.TOOL_ERROR, startNanos);
+            throw ex;
+        }
     }
 }

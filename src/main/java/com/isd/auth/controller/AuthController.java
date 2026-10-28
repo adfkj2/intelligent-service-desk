@@ -13,6 +13,7 @@ import com.isd.auth.security.LoginUser;
 import com.isd.auth.service.UserService;
 import com.isd.common.exception.BusinessException;
 import com.isd.common.exception.ErrorCode;
+import com.isd.common.metrics.IsdMetrics;
 import com.isd.common.result.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -53,17 +54,20 @@ public class AuthController {
     private final UserService userService;
     private final CurrentUserProvider currentUserProvider;
     private final SessionRegistry sessionRegistry;
+    private final IsdMetrics metrics;
 
     public AuthController(AuthenticationManager authenticationManager,
                           SecurityContextRepository securityContextRepository,
                           UserService userService,
                           CurrentUserProvider currentUserProvider,
-                          SessionRegistry sessionRegistry) {
+                          SessionRegistry sessionRegistry,
+                          IsdMetrics metrics) {
         this.authenticationManager = authenticationManager;
         this.securityContextRepository = securityContextRepository;
         this.userService = userService;
         this.currentUserProvider = currentUserProvider;
         this.sessionRegistry = sessionRegistry;
+        this.metrics = metrics;
     }
 
     @PostMapping("/register")
@@ -85,9 +89,11 @@ public class AuthController {
             authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(request.username(), request.password()));
         } catch (DisabledException ex) {
+            metrics.recordLogin("disabled");
             throw new BusinessException(ErrorCode.FORBIDDEN, "账号已被禁用，请联系管理员");
         } catch (AuthenticationException ex) {
-            // 不区分「用户不存在」和「密码错误」，避免账号枚举
+            // 指标里区分失败类型（内部可见），但响应保持统一文案，不对调用方泄漏账号是否存在
+            metrics.recordLogin("bad_credentials");
             throw new BusinessException(ErrorCode.UNAUTHORIZED, "用户名或密码错误");
         }
 
@@ -106,6 +112,7 @@ public class AuthController {
          * 否则“重置密码后踢人”找不到目标会话，SessionRevoker 会是空转。
          */
         sessionRegistry.registerNewSession(httpRequest.getSession().getId(), authentication.getPrincipal());
+        metrics.recordLogin("success");
 
         // 从数据库回读，保证 phone/email/mustChangePassword 都是最新值（Session 里的 principal 可能是旧的）
         LoginUser principal = (LoginUser) authentication.getPrincipal();

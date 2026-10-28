@@ -2,7 +2,9 @@ package com.isd.common.exception;
 
 import java.util.stream.Collectors;
 
+import com.isd.common.metrics.IsdMetrics;
 import com.isd.common.result.ApiResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -27,10 +29,24 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    private final IsdMetrics metrics;
+
+    public GlobalExceptionHandler(IsdMetrics metrics) {
+        this.metrics = metrics;
+    }
+
     /** 业务规则拒绝，如工单不存在、状态非法迁移 */
     @ExceptionHandler(BusinessException.class)
-    public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException ex) {
+    public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException ex, HttpServletRequest request) {
         log.warn("业务异常: code={}, message={}", ex.errorCode().code(), ex.getMessage());
+        /*
+         * 只把 Service 判权产生的 403 计入 resource 层。
+         * 登录禁用也复用 FORBIDDEN（为了返回 403），但那是认证结果、已经在 isd.auth.login 里记过，
+         * 混进来会让"越权"指标变吵。
+         */
+        if (ex.errorCode() == ErrorCode.FORBIDDEN && !request.getRequestURI().startsWith("/api/auth/")) {
+            metrics.recordForbidden("resource");
+        }
         return ResponseEntity.status(ex.errorCode().httpStatus())
                 .body(ApiResponse.error(ex.errorCode().code(), ex.getMessage()));
     }
@@ -76,6 +92,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex) {
         log.warn("访问被拒绝: {}", ex.getMessage());
+        metrics.recordForbidden("method");
         ErrorCode code = ErrorCode.FORBIDDEN;
         return ResponseEntity.status(code.httpStatus())
                 .body(ApiResponse.error(code.code(), code.defaultMessage()));

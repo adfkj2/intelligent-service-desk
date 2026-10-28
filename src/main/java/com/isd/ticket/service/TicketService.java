@@ -14,6 +14,7 @@ import com.isd.auth.mapper.UserMapper;
 import com.isd.auth.security.LoginUser;
 import com.isd.common.exception.BusinessException;
 import com.isd.common.exception.ErrorCode;
+import com.isd.common.metrics.IsdMetrics;
 import com.isd.common.result.PageResponse;
 import com.isd.ticket.domain.TicketAction;
 import com.isd.ticket.domain.TicketStatus;
@@ -43,13 +44,16 @@ public class TicketService {
     private final TicketMapper ticketMapper;
     private final TicketOperationLogMapper operationLogMapper;
     private final UserMapper userMapper;
+    private final IsdMetrics metrics;
 
     public TicketService(TicketMapper ticketMapper,
                          TicketOperationLogMapper operationLogMapper,
-                         UserMapper userMapper) {
+                         UserMapper userMapper,
+                         IsdMetrics metrics) {
         this.ticketMapper = ticketMapper;
         this.operationLogMapper = operationLogMapper;
         this.userMapper = userMapper;
+        this.metrics = metrics;
     }
 
     /**
@@ -131,6 +135,7 @@ public class TicketService {
         int updated = ticketMapper.updateStatusWithVersion(
                 id, current.name(), TicketAction.CLAIM.to().name(), operator.getId(), ticket.getVersion());
         if (updated == 0) {
+            metrics.recordConflict("CLAIM");
             throw new BusinessException(ErrorCode.CONFLICT, "工单已被他人接单，请刷新后重试");
         }
 
@@ -165,6 +170,7 @@ public class TicketService {
         int updated = ticketMapper.updateStatusWithVersion(
                 id, current.name(), TicketAction.ASSIGN.to().name(), assigneeId, ticket.getVersion());
         if (updated == 0) {
+            metrics.recordConflict("ASSIGN");
             throw new BusinessException(ErrorCode.CONFLICT, "工单状态已被他人修改，请刷新后重试");
         }
 
@@ -198,6 +204,7 @@ public class TicketService {
         int updated = ticketMapper.updateStatusWithVersion(
                 id, current.name(), action.to().name(), ticket.getAssigneeId(), ticket.getVersion());
         if (updated == 0) {
+            metrics.recordConflict("STATUS");
             throw new BusinessException(ErrorCode.CONFLICT, "工单状态已被他人修改，请刷新后重试");
         }
 
@@ -265,6 +272,8 @@ public class TicketService {
         log.setToStatus(toStatus);
         log.setComment(comment);
         operationLogMapper.insert(log);
+        // 成功迁移只在这一处落库，指标也在这里记，避免每个调用点各写一遍
+        metrics.recordTransition(action, fromStatus, toStatus);
     }
 
     /** 唯一索引是最后一道防线：撞号就换一个重试，3 次仍失败才向调用方报冲突 */

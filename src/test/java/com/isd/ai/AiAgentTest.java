@@ -4,6 +4,8 @@ import com.isd.ai.client.LlmClient;
 import com.isd.auth.security.LoginUser;
 import com.isd.support.AbstractIntegrationTest;
 import com.isd.support.TestUsers;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,6 +16,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -42,10 +45,14 @@ class AiAgentTest extends AbstractIntegrationTest {
     @MockitoBean
     private LlmClient llmClient;
 
+    @Autowired
+    private MeterRegistry meterRegistry;
+
     @Test
-    @DisplayName("模型正常返回：source=LLM，原文透传")
+    @DisplayName("模型正常返回：source=LLM，原文透传，指标记 success")
     void chatReturnsLlmAnswer() throws Exception {
         when(llmClient.chat(anyString())).thenReturn("你有 1 个工单处于处理中，处理人是技术支持。");
+        double successBefore = aiChatCount("success");
 
         mockMvc.perform(post("/api/ai/chat").with(user(EMPLOYEE))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -56,6 +63,8 @@ class AiAgentTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.data.source").value("LLM"))
                 .andExpect(jsonPath("$.data.answer").value(containsString("处理中")))
                 .andExpect(jsonPath("$.data.relatedTitles").isArray());
+
+        assertThat(aiChatCount("success")).isEqualTo(successBefore + 1);
     }
 
     @Test
@@ -109,5 +118,10 @@ class AiAgentTest extends AbstractIntegrationTest {
                                 """))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(40100));
+    }
+
+    private double aiChatCount(String result) {
+        Timer timer = meterRegistry.find("isd.ai.chat").tag("result", result).timer();
+        return timer == null ? 0 : timer.count();
     }
 }

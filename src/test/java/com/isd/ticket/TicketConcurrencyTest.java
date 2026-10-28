@@ -15,6 +15,8 @@ import com.isd.common.exception.BusinessException;
 import com.isd.support.AbstractIntegrationTest;
 import com.isd.support.TestUsers;
 import com.isd.ticket.service.TicketService;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -47,6 +49,9 @@ class TicketConcurrencyTest extends AbstractIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private MeterRegistry meterRegistry;
+
     private Long ticketId;
 
     @BeforeEach
@@ -71,6 +76,7 @@ class TicketConcurrencyTest extends AbstractIntegrationTest {
     @Test
     @DisplayName("两个线程同时接单同一工单：恰好一个成功，另一个 409，version 只加 1")
     void concurrentClaim() throws Exception {
+        double conflictsBefore = counterValue("isd.ticket.conflicts", "action", "CLAIM");
         ExecutorService pool = Executors.newFixedThreadPool(2);
         CountDownLatch startLine = new CountDownLatch(1);
         try {
@@ -85,6 +91,9 @@ class TicketConcurrencyTest extends AbstractIntegrationTest {
             results.add(second.get(10, TimeUnit.SECONDS));
 
             assertThat(results).containsExactlyInAnyOrder("SUCCESS", "CONFLICT");
+            // 失败方恰好计一次冲突：这个指标就是用来证明"乐观锁真的在工作"的
+            assertThat(counterValue("isd.ticket.conflicts", "action", "CLAIM"))
+                    .isEqualTo(conflictsBefore + 1);
         } finally {
             pool.shutdownNow();
         }
@@ -103,6 +112,11 @@ class TicketConcurrencyTest extends AbstractIntegrationTest {
         assertThat(assigneeId).isIn(SUPPORT_A.getId(), SUPPORT_B.getId());
         // 只有成功的那一次会写日志，失败方在写日志之前就被乐观锁拦住了
         assertThat(logCount).isEqualTo(1);
+    }
+
+    private double counterValue(String name, String tagKey, String tagValue) {
+        Counter counter = meterRegistry.find(name).tag(tagKey, tagValue).counter();
+        return counter == null ? 0 : counter.count();
     }
 
     private Callable<String> claimTask(LoginUser operator, CountDownLatch startLine) {

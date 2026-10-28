@@ -2,12 +2,13 @@ package com.isd.ai.service;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import com.isd.ai.client.LlmClient;
 import com.isd.ai.dto.ChatAnswerResponse;
+import com.isd.common.metrics.IsdMetrics;
 import com.isd.kb.dto.KbItemSummary;
 import com.isd.kb.service.KbService;
 import org.slf4j.Logger;
@@ -35,25 +36,32 @@ public class AgentService {
 
     private final LlmClient llmClient;
     private final KbService kbService;
-    private final ExecutorService aiExecutor;
+    private final Executor aiExecutor;
+    private final IsdMetrics metrics;
     private final long timeoutSeconds;
     private final String apiKey;
 
     public AgentService(LlmClient llmClient,
                         KbService kbService,
-                        @Qualifier("aiExecutor") ExecutorService aiExecutor,
+                        @Qualifier("aiExecutor") Executor aiExecutor,
+                        IsdMetrics metrics,
                         @Value("${isd.ai.timeout-seconds:30}") long timeoutSeconds,
                         @Value("${spring.ai.openai.api-key:}") String apiKey) {
         this.llmClient = llmClient;
         this.kbService = kbService;
         this.aiExecutor = aiExecutor;
+        this.metrics = metrics;
         this.timeoutSeconds = timeoutSeconds;
         this.apiKey = apiKey;
     }
 
     public ChatAnswerResponse chat(String question) {
+        // 计时覆盖到降级检索为止：用户感知的是端到端时间，不只是模型那一跳
+        long startNanos = System.nanoTime();
+
         if (!isConfigured()) {
-            return fallback(question, "AI 未配置 API Key，当前处于降级模式");
+            return finish(IsdMetrics.AI_NOT_CONFIGURED, startNanos,
+                    fallback(question, "AI 未配置 API Key，当前处于降级模式"));
         }
 
         try {
@@ -63,19 +71,26 @@ public class AgentService {
                     .get(timeoutSeconds, TimeUnit.SECONDS);
 
             if (answer == null || answer.isBlank()) {
-                return fallback(question, "AI 没有返回内容");
+                return finish(IsdMetrics.AI_EMPTY, startNanos, fallback(question, "AI 没有返回内容"));
             }
-            return new ChatAnswerResponse(answer.trim(), "LLM", List.of());
+            return finish(IsdMetrics.AI_SUCCESS, startNanos,
+                    new ChatAnswerResponse(answer.trim(), "LLM", List.of()));
         } catch (TimeoutException ex) {
             log.warn("LLM 调用超过 {} 秒，降级为知识库检索", timeoutSeconds);
-            return fallback(question, "AI 响应超时");
+            return finish(IsdMetrics.AI_TIMEOUT, startNanos, fallback(question, "AI 响应超时"));
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
-            return fallback(question, "AI 调用被中断");
+            return finish(IsdMetrics.AI_ERROR, startNanos, fallback(question, "AI 调用被中断"));
         } catch (Exception ex) {
             log.error("LLM 调用失败，降级为知识库检索", ex);
-            return fallback(question, "AI 服务暂时不可用");
+            return finish(IsdMetrics.AI_ERROR, startNanos, fallback(question, "AI 服务暂时不可用"));
         }
+    }
+
+    /** 所有出口统一收口：每个分支必须记一次，也只记一次 */
+    private ChatAnswerResponse finish(String result, long startNanos, ChatAnswerResponse response) {
+        metrics.recordAiChat(result, startNanos);
+        return response;
     }
 
     private boolean isConfigured() {

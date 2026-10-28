@@ -57,6 +57,23 @@ logging:
   level:
     root: INFO
     com.isd: DEBUG
+  pattern:
+    # 每条日志带上 TraceIdFilter 写入的 traceId，一次请求的日志可以按它串起来
+    correlation: "[%X{traceId:-}] "
+
+# 指标端点单独一个端口，并只绑本机：
+# 8081 上完全不暴露 /actuator，Security 白名单不用改；生产环境应再加防火墙或反代鉴权。
+management:
+  server:
+    port: 8082
+    address: 127.0.0.1
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: never
 
 springdoc:
   api-docs:
