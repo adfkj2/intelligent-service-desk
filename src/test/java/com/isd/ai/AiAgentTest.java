@@ -27,7 +27,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 这里验证的是"编排"（鉴权、参数校验、异常降级），不是模型答得好不好——
  * 模型回答质量只能靠人工评估，写进单元测试只会变成脆弱用例。
  */
-@SpringBootTest
+// 显式声明"已配置 Key"：否则行为取决于本机有没有 application-local.yml——
+// 开发机有真实 Key，CI 用默认占位符，同一份代码会走出两条分支。
+@SpringBootTest(properties = "spring.ai.openai.api-key=sk-test-dummy")
 @AutoConfigureMockMvc
 @Transactional
 class AiAgentTest extends AbstractIntegrationTest {

@@ -27,7 +27,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 单独一个类是因为要改 isd.ai.timeout-seconds，配置不同意味着另一个 Spring 上下文，
  * 混在 AiAgentTest 里会让所有用例都多等 1 秒。
  */
-@SpringBootTest(properties = "isd.ai.timeout-seconds=1")
+// api-key 必须显式给：CI 没有 application-local.yml，默认占位符会直接走"未配置"降级，测不到超时分支
+@SpringBootTest(properties = {
+        "isd.ai.timeout-seconds=1",
+        "spring.ai.openai.api-key=sk-test-dummy"
+})
 @AutoConfigureMockMvc
 @Transactional
 class AiTimeoutTest extends AbstractIntegrationTest {

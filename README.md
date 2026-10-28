@@ -17,7 +17,7 @@
 | 知识库 | 分类管理、条目 CRUD（创建者本人或管理员才能改删）、关键词检索、分页列表 |
 | AI 助手 | DeepSeek（OpenAI 兼容协议）+ Function Calling，两个只读工具：查当前用户工单、检索知识库；超时/异常自动降级为知识库检索 |
 | 管理台 | Vue 3 + Vite 桌面前端：工作台统计、工单列表/详情/新建、知识库、用户管理、全局 AI 抽屉；按角色显示菜单，构建产物打进同一个 jar |
-| 工程 | 统一响应与全局异常、参数校验、Springdoc 在线接口文档、Flyway 版本化迁移、Testcontainers 测试库、GitHub Actions、63 个自动化测试（含并发冲突用例） |
+| 工程 | 统一响应与全局异常、参数校验、Springdoc 在线接口文档、Flyway 版本化迁移、Testcontainers 测试库、GitHub Actions、64 个自动化测试（含并发冲突用例） |
 
 ---
 
@@ -277,10 +277,11 @@ mvn test
 | `SchemaMigrationTest` | 1 | Flyway 已应用 V1、5 张业务表与 sys_user 关键字段齐全 |
 | `KbApiTest` | 7 | 分类/条目 CRUD、归属权限、检索、通配符转义、OpenAPI 可达 |
 | `AiAgentTest` | 5 | 模型正常/异常/空回答降级、参数校验、未登录 |
+| `AiNotConfiguredTest` | 1 | 未配置 Key 时直接降级，且不发起模型调用（`verifyNoInteractions`） |
 | `AiTimeoutTest` | 1 | 模型超时触发降级 |
 | `AiToolsTest` | 4 | 工具只返回本人数据、未登录即失败、状态过滤 |
 
-合计 **63** 个用例。并发用例刻意不加 `@Transactional`——事务是连接级的，两个线程各自提交才能测出真实冲突。
+合计 **64** 个用例。并发用例刻意不加 `@Transactional`——事务是连接级的，两个线程各自提交才能测出真实冲突。
 
 测试库有两种来源（见 `AbstractIntegrationTest`）：本机有 Docker 就启 `mysql:8.0.36` 容器，Flyway 建表、Ryuk 回收；没有 Docker 则回退连本机 MySQL80（读 `application-local.yml`）。想强制走本机库，设环境变量 `ISD_TEST_NO_DOCKER=true`。
 
@@ -297,7 +298,7 @@ CI 在 `.github/workflows/ci.yml`：后端 job 跑 `mvn verify`（runner 自带 
 - AI 接口无频率限制，生产必须加配额
 - CSRF 关闭（依赖 SameSite=Lax），生产可换 Cookie 双提交模式
 - 工单号仍是"日期 + 4 位随机数 + 重试"，未换雪花/序列
-- 前端没有单元测试，靠后端 63 个用例 + 手工验收清单兜底
+- 前端没有单元测试，靠后端 64 个用例 + 手工验收清单兜底
 - Element Plus 全量引入（主包 gzip 约 410KB），内网可接受；按需引入留作优化项
 
 ---
