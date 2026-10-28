@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Element Plus 主色对齐设计稿的克制蓝 */
+  --el-color-primary: #2563eb;
+  --el-color-primary-light-3: #5b8def;
+  --el-color-primary-light-5: #93b4f5;
+  --el-color-primary-light-7: #c3d5fa;
+  --el-color-primary-light-8: #dbe7fd;
+  --el-color-primary-light-9: #eff5ff;
+  --el-color-primary-dark-2: #1d4ed8;
+
+  --el-text-color-primary: #1f2937;
+  --el-text-color-regular: #4b5563;
+  --el-border-color-lighter: #eef0f4;
+  --el-border-radius-base: 6px;
+
+  --isd-canvas: #f5f7fa;
+  --isd-line: #e5e7eb;
+  --isd-sidebar: #111827;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  color: var(--el-text-color-primary);
+  background-color: var(--isd-canvas);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 页面切换的轻量淡入，避免花哨动效 */
+.page-fade-enter-active,
+.page-fade-leave-active {
+  transition: opacity 0.15s ease;
+}
+
+.page-fade-enter-from,
+.page-fade-leave-to {
+  opacity: 0;
+}
+
+/* 表格：表头浅灰、行高 48、悬停淡蓝，符合"信息密度优先" */
+.isd-table .el-table__header th {
+  background-color: #f8fafc !important;
+  color: #6b7280;
+  font-weight: 500;
+  height: 44px;
+}
+
+.isd-table .el-table__row td {
+  height: 48px;
+}
+
+.isd-table .el-table__body tr:hover > td.el-table__cell {
+  background-color: #f5f8ff !important;
+}
+
+/* 卡片统一规格 */
+.isd-card {
+  background: #fff;
+  border: 1px solid var(--isd-line);
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+}
+
+.el-button {
+  font-weight: 400;
+}
