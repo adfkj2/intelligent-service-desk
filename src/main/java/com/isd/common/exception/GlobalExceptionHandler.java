@@ -5,9 +5,15 @@ import java.util.stream.Collectors;
 import com.isd.common.result.ApiResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -55,6 +61,51 @@ public class GlobalExceptionHandler {
         ErrorCode code = ErrorCode.NOT_FOUND;
         return ResponseEntity.status(code.httpStatus())
                 .body(ApiResponse.error(code.code(), "接口不存在: /" + ex.getResourcePath()));
+    }
+
+    /** 401：认证失败（过滤器链之外抛出的认证异常，如手工 Authenticate 时未捕获） */
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAuthentication(AuthenticationException ex) {
+        log.warn("认证失败: {}", ex.getMessage());
+        ErrorCode code = ErrorCode.UNAUTHORIZED;
+        return ResponseEntity.status(code.httpStatus())
+                .body(ApiResponse.error(code.code(), code.defaultMessage()));
+    }
+
+    /** 403：已登录但无权限（方法级安全拒绝会走到这里，不能被兜底处理成 500） */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex) {
+        log.warn("访问被拒绝: {}", ex.getMessage());
+        ErrorCode code = ErrorCode.FORBIDDEN;
+        return ResponseEntity.status(code.httpStatus())
+                .body(ApiResponse.error(code.code(), code.defaultMessage()));
+    }
+
+    /** 缺少必填查询参数（如 /api/kb/search 不传 q）：400 而不是被兜底成 500 */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingParameter(MissingServletRequestParameterException ex) {
+        log.warn("缺少必填参数: {}", ex.getParameterName());
+        ErrorCode code = ErrorCode.INVALID_PARAM;
+        return ResponseEntity.status(code.httpStatus())
+                .body(ApiResponse.error(code.code(), "缺少必填参数: " + ex.getParameterName()));
+    }
+
+    /** 405：HTTP 方法不支持，如用 GET 调 POST 接口 */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex) {
+        log.warn("请求方法不支持: {}", ex.getMessage());
+        ErrorCode code = ErrorCode.INVALID_PARAM;
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+                .body(ApiResponse.error(code.code(), "请求方法不支持: " + ex.getMethod()));
+    }
+
+    /** 415：Content-Type 不支持，如漏了 application/json */
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException ex) {
+        log.warn("Content-Type 不支持: {}", ex.getMessage());
+        ErrorCode code = ErrorCode.INVALID_PARAM;
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                .body(ApiResponse.error(code.code(), "Content-Type 不支持，请使用 application/json"));
     }
 
     /** 兜底：任何未预期异常都不把堆栈返回给调用方，只在服务端日志留完整信息 */

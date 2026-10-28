@@ -11,6 +11,8 @@ import org.springframework.http.HttpStatus;
 public enum ErrorCode {
 
     INVALID_PARAM(40000, HttpStatus.BAD_REQUEST, "请求参数不合法"),
+    UNAUTHORIZED(40100, HttpStatus.UNAUTHORIZED, "未登录或会话已失效"),
+    FORBIDDEN(40300, HttpStatus.FORBIDDEN, "无权访问该资源"),
     NOT_FOUND(40400, HttpStatus.NOT_FOUND, "资源不存在"),
     CONFLICT(40900, HttpStatus.CONFLICT, "业务冲突"),
     INTERNAL_ERROR(50000, HttpStatus.INTERNAL_SERVER_ERROR, "服务器内部错误");
