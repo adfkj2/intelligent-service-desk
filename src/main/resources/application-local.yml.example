@@ -1,5 +1,8 @@
-# 复制本文件为 application-local.yml，填入你本机的数据库密码。
+# 复制本文件为 application-local.yml，填入本机的数据库密码与 LLM Key。
 # application-local.yml 已被 .gitignore 排除，不会进入版本库。
 spring:
   datasource:
     password: "你的 MySQL root 密码"
+  ai:
+    openai:
+      api-key: "sk-你的 DeepSeek Key"

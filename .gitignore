@@ -19,3 +19,8 @@ application-local.yml
 .env
 
 .workbuddy/
+.codebuddy/
+
+# 前端依赖与构建产物（构建产物由 npm run build 生成，不进仓库）
+web/node_modules/
+src/main/resources/static/
