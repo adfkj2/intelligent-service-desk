@@ -26,9 +26,18 @@ jobs:
           cache: maven
 
       # runner 自带 Docker，AbstractIntegrationTest 会启动 MySQL 8 容器；
-      # verify 同时覆盖编译、63 个用例与打 jar
+      # verify 同时覆盖编译、64 个用例与打 jar
       - name: 测试并打包
         run: mvn -B -ntp verify
+
+      # 失败时把 surefire 报告带出来，不用在几百行日志里翻断言
+      - name: 上传测试报告
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          retention-days: 7
 
   frontend:
     name: 前端（npm build）
