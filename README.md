@@ -17,7 +17,7 @@
 | 知识库 | 分类管理、条目 CRUD（创建者本人或管理员才能改删）、关键词检索、分页列表 |
 | AI 助手 | DeepSeek（OpenAI 兼容协议）+ Function Calling，两个只读工具：查当前用户工单、检索知识库；超时/异常自动降级为知识库检索 |
 | 管理台 | Vue 3 + Vite 桌面前端：工作台统计、工单列表/详情/新建、知识库、用户管理、全局 AI 抽屉；按角色显示菜单，构建产物打进同一个 jar |
-| 工程 | 统一响应与全局异常、参数校验、Springdoc 在线接口文档、Flyway 版本化迁移、Testcontainers 测试库、GitHub Actions、64 个自动化测试（含并发冲突用例） |
+| 工程 | 统一响应与全局异常、参数校验、Springdoc 在线接口文档、Flyway 版本化迁移、Testcontainers 测试库、GitHub Actions、Micrometer 指标与 traceId 日志、68 个自动化测试（含并发冲突用例） |
 
 ---
 
@@ -30,6 +30,7 @@
 | Spring AI | 1.1.0 | BOM 管理，OpenAI starter 接 DeepSeek |
 | MyBatis | 3.0.5 | 注解 SQL + 动态 `<script>`，复杂 SQL 走 XML |
 | MySQL | 8.0 | utf8mb4，InnoDB |
+| 可观测性 | Micrometer + Prometheus | Actuator 指标端点在独立 8082，日志带 `traceId` |
 | Flyway | 随 Boot | `db/migration/V*.sql` 版本化迁移，启动自动升级；老库靠 baseline 兼容 |
 | Testcontainers | 随 Boot | 跑测试时起一次性 MySQL 容器，没有 Docker 自动回退本机库 |
 | Spring Security | 随 Boot | Session 认证 + URL 级/资源级授权 |
@@ -203,6 +204,34 @@ UPDATE sys_user SET role = 'ADMIN' WHERE username = 'demo_admin';
 
 ---
 
+## 可观测性
+
+指标端点单独开在 **8082**（只绑 `127.0.0.1`），8081 完全不暴露 actuator，业务接口的鉴权规则与 SPA 白名单都不用改：
+
+```bash
+curl http://127.0.0.1:8082/actuator/health
+curl http://127.0.0.1:8082/actuator/prometheus | findstr isd_
+```
+
+| 指标 | 类型 | 标签 | 回答什么 |
+|---|---|---|---|
+| `http_server_requests_seconds` | Timer（Starter 自带） | uri/method/status/outcome | 全站 P95、5xx 率；uri 是模板路径，基数安全 |
+| `isd_ai_chat_seconds` | Timer | result = success/timeout/error/empty/not_configured | AI 慢不慢、降级多不多 |
+| `isd_ai_tool_calls_seconds` | Timer | tool × result = success/empty/error | 工具层失败率——框架会吞掉工具异常，端到端指标看不出来 |
+| `isd_ticket_transitions_total` | Counter | action/from/to | 状态机流量画像 |
+| `isd_ticket_conflicts_total` | Counter | action = CLAIM/ASSIGN/STATUS | 乐观锁冲突，证明并发保护真的在工作 |
+| `isd_auth_login_total` | Counter | result = success/bad_credentials/disabled | 登录失败率、撞库信号 |
+| `isd_auth_session_revoked_total` | Counter | reason = password_reset/password_changed | 踢人是否生效 |
+| `isd_auth_forbidden_total` | Counter | layer = url/method/resource | 越权探测 |
+| `isd_sessions_active` | Gauge | 无 | 在线会话数 |
+| `isd_ai_executor_*` | Gauge | 无 | AI 线程池队列长度与活跃线程 |
+
+两条口径约定：**比率一律在查询侧算**（冲突率 = `conflicts / (transitions + conflicts)`），不存比率；**标签只放有限枚举**，用户名、工单号只进日志。
+
+日志全部带 `traceId`：请求带 `X-Request-Id` 就沿用，没带就生成 8 位并回写响应头。AI 调用跑在 `ai-call-*` 线程池里，`TaskDecorator` 会把 MDC 与 SecurityContext 一并带过去，所以一次对话的 Controller → Service → Mapper → 模型调用可以按同一个 id 串起来。
+
+---
+
 ## 项目结构
 
 ```
@@ -210,6 +239,7 @@ src/main/java/com/isd/
 ├── IsdApplication.java
 ├── common/
 │   ├── config/        SecurityConfig（过滤器链）、OpenApiConfig、AiConfig（线程池 + ChatClient）
+│   ├── metrics/       IsdMetrics（业务指标唯一出口）、MetricsConfig（活跃会话 Gauge）
 │   ├── exception/     BusinessException、ErrorCode、GlobalExceptionHandler
 │   ├── result/        ApiResponse、PageResponse
 │   └── web/           PingController、SpaForwardController（history 路由回退）
@@ -275,13 +305,15 @@ mvn test
 | `PasswordFlowTest` | 5 | 重置密码、旧会话失效、临时密码强制改密、公开联系方式、清空联系方式校验 |
 | `UserRoleConcurrencyTest` | 2 | 并发改同一用户角色（version 只加 1）、过期 version 更新被拒 |
 | `SchemaMigrationTest` | 1 | Flyway 已应用 V1、5 张业务表与 sys_user 关键字段齐全 |
+| `TraceIdFilterTest` | 3 | traceId 生成、合法值透传、非法/超长值丢弃 |
+| `MetricsApiTest` | 1 | 登录失败与 URL 级越权各计一次数（差值断言） |
 | `KbApiTest` | 7 | 分类/条目 CRUD、归属权限、检索、通配符转义、OpenAPI 可达 |
 | `AiAgentTest` | 5 | 模型正常/异常/空回答降级、参数校验、未登录 |
 | `AiNotConfiguredTest` | 1 | 未配置 Key 时直接降级，且不发起模型调用（`verifyNoInteractions`） |
 | `AiTimeoutTest` | 1 | 模型超时触发降级 |
 | `AiToolsTest` | 4 | 工具只返回本人数据、未登录即失败、状态过滤 |
 
-合计 **64** 个用例。并发用例刻意不加 `@Transactional`——事务是连接级的，两个线程各自提交才能测出真实冲突。
+合计 **68** 个用例。并发用例刻意不加 `@Transactional`——事务是连接级的，两个线程各自提交才能测出真实冲突；指标断言一律用**差值**，因为 Spring 上下文复用、计数器不会在测试之间清零。
 
 测试库有两种来源（见 `AbstractIntegrationTest`）：本机有 Docker 就启 `mysql:8.0.36` 容器，Flyway 建表、Ryuk 回收；没有 Docker 则回退连本机 MySQL80（读 `application-local.yml`）。想强制走本机库，设环境变量 `ISD_TEST_NO_DOCKER=true`。
 
@@ -298,7 +330,7 @@ CI 在 `.github/workflows/ci.yml`：后端 job 跑 `mvn verify`（runner 自带 
 - AI 接口无频率限制，生产必须加配额
 - CSRF 关闭（依赖 SameSite=Lax），生产可换 Cookie 双提交模式
 - 工单号仍是"日期 + 4 位随机数 + 重试"，未换雪花/序列
-- 前端没有单元测试，靠后端 64 个用例 + 手工验收清单兜底
+- 前端没有单元测试，靠后端 68 个用例 + 手工验收清单兜底
 - Element Plus 全量引入（主包 gzip 约 410KB），内网可接受；按需引入留作优化项
 
 ---

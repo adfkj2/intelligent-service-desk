@@ -17,6 +17,7 @@
 | LLM Key | `src/main/resources/application-local.yml` | `spring.ai.openai.api-key` 非占位符 |
 | 管理员联系方式 | `SELECT username, phone, email FROM isd.sys_user WHERE role='ADMIN' AND status=1;` | 至少一个管理员填了手机号或邮箱，否则「忘记密码」只能显示空状态 |
 | 健康检查 | `http://localhost:8081/api/ping` | `{"code":0,...,"status":"UP"}` |
+| 指标端点 | `http://127.0.0.1:8082/actuator/health` | `{"status":"UP"}`；同一路径在 8081 上应 404 |
 
 > 表结构由 Flyway 在启动时创建/升级（`db/migration/V*.sql`），不需要手工执行 SQL；库里出现 `flyway_schema_history` 是正常的。
 

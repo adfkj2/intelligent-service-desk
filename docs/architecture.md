@@ -244,11 +244,24 @@ WHERE id=? AND status='OPEN' AND version=?
 
 ### ADR-14 测试库：容器优先，本机回退
 
-- **背景**：64 个集成测试全部依赖真实 MySQL，要求每台机器都装好 MySQL80 并配好 `application-local.yml`，换机器或进 CI 就跑不起来。
+- **背景**：68 个集成测试全部依赖真实 MySQL，要求每台机器都装好 MySQL80 并配好 `application-local.yml`，换机器或进 CI 就跑不起来。
 - **决策**：`AbstractIntegrationTest` 启动一个 `mysql:8.0.36` 单例容器，用 `@DynamicPropertySource` 覆盖数据源；探测不到 Docker 时不注册任何属性，回退 `spring.datasource.*`（本机库）。`ISD_TEST_NO_DOCKER=true` 可强制回退。
 - **为什么容器放静态字段**：Spring 上下文会缓存复用，容器若随测试类停止，下一个复用同一上下文的测试类就连不上库。
 - **代价**：有 Docker 时每个测试 JVM 多 10–20 秒；没有 Docker 时探测会先等几秒再回退。
 - **CI**：GitHub Actions 两个 job 并行——后端 `mvn verify`（runner 自带 Docker，固定走容器模式），前端 `npm ci && npm run build`。
+
+### ADR-15 可观测性：按"边界 + 结果"建指标，比率只在查询侧算
+
+- **背景**：AI 超时/降级、抢单冲突、登录失败、越权访问这些关键行为此前只有零散日志，回答不了"最近是不是变慢""冲突率多少"。
+- **决策**：
+  1. **一个边界一个指标名，结果放标签**：如 `isd.ai.chat{result=success|timeout|error|empty|not_configured}`，而不是 5 个独立计数器——否则算降级率要跨指标拼分母。
+  2. **比率不落库**：冲突率 = `conflicts / (transitions + conflicts)`，降级率从 `result != success` 派生。存比率会引入"分母口径漂移"和二次聚合错误。
+  3. **标签只放有限枚举**（result/action/layer/tool），用户名、工单号、IP 一律只进日志，避免时间序列爆炸。
+  4. **Gauge 只表示瞬时量**（活跃会话、线程池队列），累计量一律 Counter。
+  5. **工具层单独埋点**：Spring AI 会捕获工具异常并把错误文本交给模型，端到端仍是 success，只有 `isd.ai.tool.calls` 能看出失败；埋点时异常必须原样抛出，否则会改变模型看到的结果。
+  6. **指标端点独立端口 8082 并绑 127.0.0.1**：不放进 8081，也就不需要往 Security 白名单里开口子，避免指标匿名可读。
+- **代价**：多一个 Tomcat 连接器；标签枚举靠人维护，写错名字会变成"指标静默缺失"，所以用 `SimpleMeterRegistry` 的差值断言把关键指标测住。
+- **不做**：OpenTelemetry Collector、Jaeger、ELK。单体没有跨服务调用链，traceId（MDC）+ Prometheus 指标已足够。
 
 ---
 

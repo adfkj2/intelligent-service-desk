@@ -11,7 +11,7 @@
 > 第四块是 AI 助手——它只能查当前用户自己的工单和知识库，不能执行任何写操作。
 > 技术栈是 Spring Boot 3.5 + MyBatis + MySQL + Spring Security，AI 部分用 Spring AI 接 DeepSeek 做 Function Calling。
 > 重点做了两件事：**工单状态机的并发正确性**（乐观锁 + 双线程冲突测试）和 **AI 工具的权限隔离**（工具签名不带 userId，身份只从 SecurityContext 取）。
-> 一共 28 个接口、5 张业务表、64 个自动化测试（Flyway 迁移 + Testcontainers + GitHub Actions）。
+> 一共 28 个接口、5 张业务表、68 个自动化测试（Flyway 迁移 + Testcontainers + GitHub Actions + Micrometer 指标）。
 
 ---
 
@@ -277,7 +277,24 @@ WHERE id=? AND status='OPEN' AND version=?
 
 **Q53：CI 怎么设计的？**
 一句话：两个并行 job，后端 `mvn verify`（runner 自带 Docker，固定走容器模式），前端 `npm ci && npm run build`。
-展开：`verify` 一次覆盖编译、64 个用例与打 jar；前端 job 顺带拦住"新克隆忘构建前端导致白屏"这个坑。`concurrency` 让同分支的旧流水线自动取消，省 runner 时间。
+展开：`verify` 一次覆盖编译、68 个用例与打 jar；前端 job 顺带拦住"新克隆忘构建前端导致白屏"这个坑。`concurrency` 让同分支的旧流水线自动取消，省 runner 时间。
+
+---
+
+## 6.5 可观测性
+
+**Q54：指标怎么定？为什么不直接做一个 `ai_fallback_total`？**
+一句话：一个边界一个指标名，结果放标签；比率在查询侧算，不落库。
+展开：`isd.ai.chat{result=success|timeout|error|empty|not_configured}` 一条就能出 QPS、P95 和降级率。如果拆成 `ai_success_total` / `ai_timeout_total` / `ai_error_total`，算降级率要跨三个指标拼分母，告警也要写三条，而且新增分支时容易漏。冲突率同理：只存分子 `isd.ticket.conflicts`，分母用 `isd.ticket.transitions`。
+另一个原则是标签基数：只放 result/action/layer/tool 这类有限枚举，用户名与工单号只进日志——否则时间序列会被"每个用户一条"打爆。
+
+**Q55：为什么工具调用要单独一个指标？**
+一句话：Spring AI 会捕获工具异常并把错误文本交给模型，端到端仍然是 success，不单独埋点就完全看不见。
+展开：用户看到的是"没查到相关工单"，与"真的没有数据"在指标上无法区分；只有 `isd.ai.tool.calls{tool,result}` 能看出失败率。埋点有个硬约束：异常必须原样抛出，一旦为了指标好看而吞掉，模型收到的语义就从"未登录"变成了"空结果"，等于埋点改变了业务行为。
+
+**Q56：traceId 怎么跨到 AI 线程池？**
+一句话：`ThreadPoolTaskExecutor` + 自定义 `TaskDecorator`，把 SecurityContext 与 MDC 一起带过去，并在 finally 里成对还原。
+展开：原来用 `DelegatingSecurityContextExecutorService` 只搬了身份，日志里 AI 那段没有 traceId；换成 TaskDecorator 后两样都搬。必须 restore 而不是简单 clear，否则线程复用会把上一个请求的身份或 traceId 泄漏给下一个任务。指标端点单独开在 8082 并绑 127.0.0.1，就不必往 Security 白名单里开口子。
 
 ---
 
@@ -293,7 +310,7 @@ WHERE id=? AND status='OPEN' AND version=?
 
 - 基于 **Spring Boot 3.5 + MyBatis + MySQL** 独立开发企业 IT 服务台，覆盖工单全生命周期（创建/接单/指派/解决/关闭）与知识库，共 28 个 REST 接口、5 张表。
 - 工单状态流转用**枚举迁移白名单 + 乐观锁**保证并发正确性，编写 `CountDownLatch` 双线程冲突测试，验证同一工单并发接单**恰好一人成功**（另一人 409），并配套 4 表审计日志；用户管理同样用 `version` 条件更新 + 管理员行锁，避免两个管理员互相降权后系统失去管理员。
-- 基于 **Spring AI（DeepSeek）** 实现只读 AI 助手：工具签名不透传 userId、身份取自 SecurityContext，杜绝提示注入越权；加入 30s 硬超时与知识库降级，AI 故障不影响主业务。累计 **64 个自动化测试**全部通过。
+- 基于 **Spring AI（DeepSeek）** 实现只读 AI 助手：工具签名不透传 userId、身份取自 SecurityContext，杜绝提示注入越权；加入 30s 硬超时与知识库降级，AI 故障不影响主业务。累计 **68 个自动化测试**全部通过。
 
 ---
 
@@ -308,7 +325,7 @@ WHERE id=? AND status='OPEN' AND version=?
 | 角色 | 3（EMPLOYEE / SUPPORT / ADMIN） |
 | AI 工具 | 2（查工单 / 查知识库） |
 | AI 超时 | 30 秒（可配） |
-| 测试用例 | 64 |
+| 测试用例 | 68 |
 | 前端页面 | 8（登录 / 修改密码 / 工作台 / 工单列表 / 详情 / 新建 / 知识库 / 用户管理）+ AI 抽屉 |
 | 前端主包 | gzip 约 410KB（Element Plus 全量引入） |
 | 端口 | 8081（开发期前端 5173 代理到 8081） |
