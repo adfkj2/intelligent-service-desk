@@ -28,7 +28,11 @@ service.interceptors.response.use(
   (error) => {
     const status = error.response?.status
     const body = error.response?.data
-    const message = body?.message || '网络异常，请稍后重试'
+    /*
+     * message 不在这里兜底成"网络异常"：兜底会盖掉下面每个状态码自己的默认文案
+     * （403 的"没有权限"、409 的"数据已被他人修改"），只剩一句没有指引的通用错误。
+     */
+    const message = body?.message
     const url = error.config?.url || ''
     /*
      * silent：调用方明确表示"失败不用提示用户"，用于后台轮询（未读数）这类请求。
@@ -41,7 +45,7 @@ service.interceptors.response.use(
       if (url.includes('/auth/login')) {
         // 登录接口的 401 是"用户名或密码错误"，直接展示后端文案，不能提示"登录已失效"
         if (!silent) {
-          ElMessage.error(message)
+          ElMessage.error(message || '用户名或密码错误')
         }
       } else if (!url.includes('/auth/me')) {
         // /auth/me 的 401 是"未登录"的正常探测，交给路由守卫处理，不在这里提示与跳转
@@ -72,7 +76,7 @@ service.interceptors.response.use(
         ElMessage.warning(message || '操作过于频繁，请稍后再试')
       }
     } else if (!silent) {
-      ElMessage.error(message)
+      ElMessage.error(message || '网络异常，请稍后重试')
     }
     return Promise.reject(error)
   }
