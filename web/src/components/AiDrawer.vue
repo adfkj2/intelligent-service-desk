@@ -57,11 +57,23 @@ async function send(text) {
     })
   } catch (error) {
     console.error('AI 对话失败', error)
-    messages.value.push({
-      role: 'assistant',
-      text: '这次没连上 AI 服务，请稍后再试，或直接到知识库搜索关键词。',
-      source: 'ERROR'
-    })
+    /*
+     * 429 是"配额用完"，不是"服务挂了"：两者对用户的行动指引完全不同——
+     * 前者等几十秒就好，后者要去知识库。所以直接把后端文案（含剩余秒数）放进气泡。
+     */
+    if (error?.response?.status === 429) {
+      messages.value.push({
+        role: 'assistant',
+        text: error.response?.data?.message || 'AI 调用过于频繁，请稍后再试',
+        source: 'RATE_LIMITED'
+      })
+    } else {
+      messages.value.push({
+        role: 'assistant',
+        text: '这次没连上 AI 服务，请稍后再试，或直接到知识库搜索关键词。',
+        source: 'ERROR'
+      })
+    }
   } finally {
     loading.value = false
     scrollToBottom()
@@ -105,6 +117,9 @@ async function send(text) {
               </el-tag>
               <el-tag v-else-if="message.source === 'ERROR'" size="small" type="danger" effect="light">
                 请求失败
+              </el-tag>
+              <el-tag v-else-if="message.source === 'RATE_LIMITED'" size="small" type="warning" effect="light">
+                调用受限
               </el-tag>
               <el-tag v-else size="small" type="success" effect="plain">模型回答</el-tag>
               <span v-if="message.titles?.length" class="text-xs text-ink-400">参考知识：</span>

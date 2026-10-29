@@ -106,5 +106,11 @@ public abstract class AbstractIntegrationTest {
          * IP 维度的逻辑由 LoginRateLimitTest 直接构造限流组件验证。
          */
         registry.add("isd.auth.login.max-failures-per-ip", () -> 1000);
+        /*
+         * AI 限流的 IP 维度同理：所有用例都从 127.0.0.1 发请求，
+         * 按真实阈值（60/min）跑整套 AI 用例会互相把配额吃光。用户维度不放宽，
+         * 由 AiRateLimitTest 用 properties 覆盖成小阈值来验证。
+         */
+        registry.add("isd.ai.rate-limit.max-per-ip", () -> 1000);
     }
 }

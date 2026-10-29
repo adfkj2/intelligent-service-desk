@@ -32,6 +32,8 @@ public class IsdMetrics {
     private static final String AUTH_LOGIN = "isd.auth.login";
     private static final String AUTH_SESSION_REVOKED = "isd.auth.session.revoked";
     private static final String AUTH_FORBIDDEN = "isd.auth.forbidden";
+    private static final String AI_RATE_LIMITED = "isd.ai.rate_limited";
+    private static final String RETENTION_DELETED = "isd.retention.deleted";
     /*
      * 注意别用 "created" 结尾：Prometheus 把 _created 视为"创建时间"保留序列，
      * Micrometer 的命名转换会把它剥掉（isd_session_created_total 会变成 isd_session_total）。
@@ -184,5 +186,30 @@ public class IsdMetrics {
                 .tag("layer", layer)
                 .register(registry)
                 .increment();
+    }
+
+    /**
+     * AI 对话因限流被拒绝：dimension=user 说明"某个人在刷"，ip 说明"某个出口在刷"。
+     * 两者分开计数才判断得出该调阈值还是该查滥用——合在一起就只剩一个没信息量的总数。
+     */
+    public void recordAiRateLimited(String dimension) {
+        Counter.builder(AI_RATE_LIMITED)
+                .description("AI 对话被限流拒绝的次数")
+                .tag("dimension", dimension)
+                .register(registry)
+                .increment();
+    }
+
+    /**
+     * 保留策略删除行数：target=ai_chat_log/outbox_event/notification。
+     * 按 0 也照常累加（counter 因此会出现在指标里），这样"任务跑了但没东西可删"
+     * 与"任务根本没跑"在监控上能区分开。
+     */
+    public void recordRetentionDeleted(String target, int count) {
+        Counter.builder(RETENTION_DELETED)
+                .description("按保留策略删除的行数")
+                .tag("target", target)
+                .register(registry)
+                .increment(count);
     }
 }

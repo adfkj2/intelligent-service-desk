@@ -16,6 +16,7 @@ import com.isd.common.exception.BusinessException;
 import com.isd.common.exception.ErrorCode;
 import com.isd.common.metrics.IsdMetrics;
 import com.isd.common.result.ApiResponse;
+import com.isd.common.web.ClientIp;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -70,17 +71,6 @@ public class AuthController {
         this.metrics = metrics;
     }
 
-    /**
-     * 取来源 IP 用于限流。
-     *
-     * 只用 remoteAddr，不读 X-Forwarded-For：这个头客户端可以随便伪造，
-     * 在没有可信反向代理的前提下读它等于把限流关掉。真上了网关再改成
-     * ForwardedHeaderFilter 或网关注入的可信头。
-     */
-    private String clientIp(HttpServletRequest request) {
-        return request.getRemoteAddr();
-    }
-
     @PostMapping("/register")
     public ResponseEntity<ApiResponse<UserResponse>> register(@Valid @RequestBody RegisterRequest request) {
         UserResponse created = userService.register(request);
@@ -95,7 +85,7 @@ public class AuthController {
     public ApiResponse<UserResponse> login(@Valid @RequestBody LoginRequest request,
                                            HttpServletRequest httpRequest,
                                            HttpServletResponse httpResponse) {
-        String clientIp = clientIp(httpRequest);
+        String clientIp = ClientIp.of(httpRequest);
         long lockedSeconds = loginAttemptGuard.lockedSeconds(request.username(), clientIp);
         if (lockedSeconds > 0) {
             // 先判锁再验证凭据：锁定期间连"密码对不对"都不告诉对方，避免变成密码探测接口
