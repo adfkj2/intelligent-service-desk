@@ -141,6 +141,63 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+
+            <!--
+                覆盖率：prepare-agent 给 surefire 的 JVM 挂探针，report 在 verify 阶段出报告，
+                check 用阈值当门禁。版本必须显式声明：Boot 的 parent 不管理 jacoco 插件版本。
+                0.8.12 才完整支持 Java 21 的 class 文件版本。
+            -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <!--
+                        门禁阈值来自实测基线（行覆盖 91.90%、分支 71.76%），取 0.90 留出正常波动空间：
+                        新增一个未测分支不会立刻红，但"整个类没有测试"会被拦住。
+                    -->
+                    <execution>
+                        <id>check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+                <configuration>
+                    <!-- 启动类没有可测逻辑，统计进去只会稀释数字 -->
+                    <excludes>
+                        <exclude>com/isd/IsdApplication.class</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 

@@ -1,0 +1,24 @@
+# 统一行尾策略：避免「库里 LF、工作区 CRLF」造成的假 diff 与 Linux 脚本执行失败
+* text=auto eol=lf
+
+# Windows 专用脚本必须是 CRLF，否则 cmd 解析会出问题
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Maven Wrapper：mvnw 必须 LF 且可执行（CI 里还有 chmod +x 兜底）
+mvnw        text eol=lf
+mvnw.cmd    text eol=crlf
+.mvn/**     text eol=lf
+
+*.sh        text eol=lf
+*.sql       text eol=lf
+
+# 二进制资源不参与换行符转换
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.woff      binary
+*.woff2     binary
+*.pdf       binary
