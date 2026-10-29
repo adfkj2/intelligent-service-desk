@@ -107,6 +107,11 @@ npm run build            # 输出到 ../src/main/resources/static
 
 # 开发模式（可选）：5173 端口，/api 由 Vite 代理到 8081，改代码热更新
 npm run dev
+
+# 质量门禁（CI 里与 lint 同级阻断）
+npm run lint       # ESLint 9 flat config，--max-warnings=0
+npm test           # Vitest + Vue Test Utils（jsdom），25 个单测
+npm run test:coverage   # 额外产出覆盖率报告到 web/coverage/
 ```
 
 开发期浏览器只看到 `http://localhost:5173` 一个源，`JSESSIONID` 因此是同源 Cookie：**Spring 侧不需要任何 CORS 配置，前端也不把 token 存 localStorage**。
@@ -432,7 +437,7 @@ web/                   前端工程（独立 npm 包，构建产物回灌 src/ma
 CI 在 `.github/workflows/ci.yml`，三个 job 都是硬门禁：
 
 - **后端**：`./mvnw verify`（runner 自带 Docker，固定走容器模式），一次覆盖编译、96 个用例、JaCoCo 覆盖率检查与打 jar；失败的 surefire 报告和每次都生成的 `target/site/jacoco/` 都会作为产物上传；
-- **前端**：`npm ci` → `npm run lint`（ESLint 9 flat config，未定义变量、`v-for` 缺 `:key` 这类真问题为 error）→ `npm run build`；
+- **前端**：`npm ci` → `npm run lint`（ESLint 9 flat config，未定义变量、`v-for` 缺 `:key` 这类真问题为 error）→ `npm test`（Vitest，25 个单测）→ `npm run build`；
 - **镜像**：`docker build`（不推送），专门拦住「只在本地机器能构建」的退化——缺文件、依赖本机 `static/`、忘写 `.dockerignore` 都会在这一步暴露。
 
 ---
@@ -447,7 +452,7 @@ CI 在 `.github/workflows/ci.yml`，三个 job 都是硬门禁：
 - 幂等键只在"同一用户 + 同一 key"下生效，key 由前端页面生成，没有做服务端过期回收（靠唯一索引长期占用存储可忽略的空间）
 - CSRF 关闭（依赖 SameSite=Lax），生产可换 Cookie 双提交模式
 - 工单号仍是"日期 + 4 位随机数 + 重试"，未换雪花/序列
-- 前端没有单元测试，靠后端 96 个用例 + 手工验收清单兜底
+- 前端只有 25 个单测（请求拦截器、会话 store、回跳校验、通知铃铛），覆盖的是"跑错会静默出错"的逻辑；页面级 E2E 与视觉回归仍未做，靠手工验收清单兜底
 - Element Plus 全量引入（主包 gzip 约 410KB），内网可接受；按需引入留作优化项
 - 会话强依赖 Redis：Redis 不可用时应用启动失败（刻意不做内存降级）；Redis 侧需要开启 keyspace 事件通知才能统计 `reason=expired`
 - 每次请求多一次 Redis 往返（Lettuce 连接复用，通常亚毫秒），换来多实例部署下的会话一致性；未做会话本地缓存，避免「缓存未失效导致踢人不生效」
