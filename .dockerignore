@@ -1,0 +1,24 @@
+# 构建上下文瘦身 + 防密钥进镜像
+#
+# 关键点：
+# 1) static/ 与 node_modules 都是本地产物，镜像里由 node 阶段重新构建，COPY 进来只会拖慢构建；
+# 2) application-local.yml 存着真实 DeepSeek Key（且已被 gitignore），绝不能进上下文；
+# 3) target/ 里可能有 60MB 的旧 jar，多阶段构建用不上。
+
+target/
+src/test/
+src/main/resources/static/
+
+web/node_modules/
+web/dist/
+
+.git/
+.github/
+.idea/
+.vscode/
+.codebuddy/
+.workbuddy/
+docs/
+
+**/application-local.yml
+*.log

@@ -1,0 +1,75 @@
+# 全栈编排：应用 + MySQL + Redis，一条命令起完整环境
+#
+#   docker compose -f docker-compose.stack.yml up -d --build
+#   docker compose -f docker-compose.stack.yml down          # 保留数据卷
+#   docker compose -f docker-compose.stack.yml down -v       # 连数据一起删
+#
+# 与 docker-compose.yml 的关系：那个只管开发依赖（只有 Redis，MySQL 用本机）。
+# 本文件把 MySQL 与 Redis 都容器化，管理端口不占用宿主机 3306/6379，避免和本机 MySQL80 冲突。
+# 两个文件属于同一个 compose 项目（服务名 redis 同名），只能二选一，不要同时启动。
+
+name: isd-stack
+
+services:
+  mysql:
+    image: mysql:8.0.36
+    container_name: isd-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_DATABASE: isd
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+    volumes:
+      - isd-mysql-data:/var/lib/mysql
+    healthcheck:
+      # 用 $$ 转义，让 compose 把 $MYSQL_ROOT_PASSWORD 交给容器内的 shell 展开
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: isd-stack-redis
+    # notify-keyspace-events：Spring Session 依赖过期事件发布 SessionExpiredEvent
+    command: ["redis-server", "--appendonly", "yes", "--notify-keyspace-events", "Egx"]
+    volumes:
+      - isd-stack-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # 国内网络默认走阿里云镜像；CI / 海外环境留空即用 Maven Central
+        MAVEN_MIRROR_URL: ${MAVEN_MIRROR_URL:-}
+    image: isd:local
+    container_name: isd-app
+    # 等两个依赖真的可用再启动：Flyway 启动即迁移，MySQL 没起来会直接失败退出
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_URL: "jdbc:mysql://mysql:3306/isd?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
+      DB_USERNAME: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      REDIS_HOST: redis
+      # 不配真实 Key 也能启动：AgentService 识别占位符后直接走知识库降级
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-local-placeholder}
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+
+volumes:
+  isd-mysql-data:
+  isd-stack-redis-data:
