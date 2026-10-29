@@ -22,11 +22,42 @@ import org.apache.ibatis.annotations.Update;
 public interface TicketMapper {
 
     @Insert("""
-            INSERT INTO ticket (ticket_no, title, description, category, priority, status, creator_id)
-            VALUES (#{ticketNo}, #{title}, #{description}, #{category}, #{priority}, #{status}, #{creatorId})
+            INSERT INTO ticket (ticket_no, title, description, category, priority, status, creator_id, idempotency_key)
+            VALUES (#{ticketNo}, #{title}, #{description}, #{category}, #{priority}, #{status}, #{creatorId},
+                    #{idempotencyKey})
             """)
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(Ticket ticket);
+
+    /**
+     * 幂等重放查询：同一用户 + 同一 key 只可能有一条（唯一索引保证）。
+     * 走 uk_creator_idempotency，等值查询，不会扫表。
+     */
+    @Select("""
+            SELECT id, ticket_no, title, description, category, priority, status,
+                   creator_id, idempotency_key, assignee_id, version, created_at, updated_at
+            FROM ticket
+            WHERE creator_id = #{creatorId} AND idempotency_key = #{idempotencyKey}
+            """)
+    Optional<Ticket> findByCreatorAndIdempotencyKey(@Param("creatorId") Long creatorId,
+                                                    @Param("idempotencyKey") String idempotencyKey);
+
+    /**
+     * 同上，但用锁定读（当前读）。
+     *
+     * 为什么必须单独来一个：并发同 key 时，插入会先等对方事务提交，然后抛唯一键冲突；
+     * 此时我们的事务早已建立过快照（前面的普通 SELECT），REPEATABLE READ 下再普通查
+     * 依然看不到那一行，会被误判成"工单号冲突"。FOR UPDATE 是当前读，能看到最新已提交数据。
+     */
+    @Select("""
+            SELECT id, ticket_no, title, description, category, priority, status,
+                   creator_id, idempotency_key, assignee_id, version, created_at, updated_at
+            FROM ticket
+            WHERE creator_id = #{creatorId} AND idempotency_key = #{idempotencyKey}
+            FOR UPDATE
+            """)
+    Optional<Ticket> findByCreatorAndIdempotencyKeyForUpdate(@Param("creatorId") Long creatorId,
+                                                             @Param("idempotencyKey") String idempotencyKey);
 
     @Select("""
             SELECT id, ticket_no, title, description, category, priority, status,

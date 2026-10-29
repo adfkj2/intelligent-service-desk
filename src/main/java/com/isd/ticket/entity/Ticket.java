@@ -16,6 +16,8 @@ public class Ticket {
     private String priority;
     private String status;
     private Long creatorId;
+    /** 客户端幂等键；为空表示这次创建没有启用幂等（历史行为） */
+    private String idempotencyKey;
     private Long assigneeId;
     private Integer version;
     private LocalDateTime createdAt;
@@ -83,6 +85,14 @@ public class Ticket {
 
     public void setCreatorId(Long creatorId) {
         this.creatorId = creatorId;
+    }
+
+    public String getIdempotencyKey() {
+        return idempotencyKey;
+    }
+
+    public void setIdempotencyKey(String idempotencyKey) {
+        this.idempotencyKey = idempotencyKey;
     }
 
     public Long getAssigneeId() {

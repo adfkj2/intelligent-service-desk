@@ -5,6 +5,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -19,6 +20,7 @@ import com.isd.common.result.PageResponse;
 import com.isd.ticket.domain.TicketAction;
 import com.isd.ticket.domain.TicketStatus;
 import com.isd.ticket.dto.CreateTicketRequest;
+import com.isd.ticket.dto.TicketCreationResult;
 import com.isd.ticket.dto.TicketResponse;
 import com.isd.ticket.entity.Ticket;
 import com.isd.ticket.entity.TicketOperationLog;
@@ -40,6 +42,8 @@ public class TicketService {
     private static final Set<String> ALLOWED_CATEGORIES = Set.of("IT_FAULT", "PERMISSION", "DEVICE", "OTHER");
     private static final int TICKET_NO_MAX_ATTEMPTS = 3;
     private static final int MAX_PAGE_SIZE = 100;
+    /** 与 V2 迁移里 idempotency_key 的列长度保持一致 */
+    private static final int IDEMPOTENCY_KEY_MAX_LENGTH = 64;
 
     private final TicketMapper ticketMapper;
     private final TicketOperationLogMapper operationLogMapper;
@@ -58,9 +62,31 @@ public class TicketService {
 
     /**
      * 创建工单。事务边界在这一层：插入 + 写审计日志 + 回查必须在同一个事务里。
+     *
+     * 幂等：请求带 Idempotency-Key 时，同一用户 + 同一 key 只会落一条工单，
+     * 重复请求返回第一条并标记 replayed=true（Controller 用 200 + 响应头区分）。
+     * key 为空时保持老行为，不影响任何现有调用方。
      */
+    /** 不带幂等键的创建（内部调用用）：等价于老行为，每次都会新建 */
     @Transactional
-    public TicketResponse create(CreateTicketRequest request, LoginUser operator) {
+    public TicketCreationResult create(CreateTicketRequest request, LoginUser operator) {
+        return create(request, operator, null);
+    }
+
+    @Transactional
+    public TicketCreationResult create(CreateTicketRequest request, LoginUser operator, String rawIdempotencyKey) {
+        String idempotencyKey = normalizeIdempotencyKey(rawIdempotencyKey);
+
+        // 快路径：绝大多数重放（用户双击、前端重试）在这里命中，避免走异常分支
+        if (idempotencyKey != null) {
+            Optional<Ticket> replayed = ticketMapper
+                    .findByCreatorAndIdempotencyKey(operator.getId(), idempotencyKey);
+            if (replayed.isPresent()) {
+                metrics.recordIdempotentReplay("CREATE_TICKET");
+                return new TicketCreationResult(TicketResponse.from(replayed.get()), true);
+            }
+        }
+
         Ticket ticket = new Ticket();
         ticket.setTitle(request.title());
         ticket.setDescription(request.description());
@@ -68,11 +94,17 @@ public class TicketService {
         ticket.setPriority(request.priority() == null ? DEFAULT_PRIORITY : request.priority());
         ticket.setStatus(TicketStatus.OPEN.name());
         ticket.setCreatorId(operator.getId());
+        ticket.setIdempotencyKey(idempotencyKey);
 
-        insertWithTicketNoRetry(ticket);
+        Ticket persisted = insertOrReplay(ticket);
+        if (persisted != ticket) {
+            // 并发同 key：唯一索引挡下了第二次插入，返回先落地的那条
+            metrics.recordIdempotentReplay("CREATE_TICKET");
+            return new TicketCreationResult(TicketResponse.from(persisted), true);
+        }
 
         writeLog(ticket.getId(), operator.getId(), "CREATE", null, TicketStatus.OPEN.name(), "创建工单");
-        return TicketResponse.from(reload(ticket.getId()));
+        return new TicketCreationResult(TicketResponse.from(reload(ticket.getId())), false);
     }
 
     @Transactional(readOnly = true)
@@ -276,14 +308,29 @@ public class TicketService {
         metrics.recordTransition(action, fromStatus, toStatus);
     }
 
-    /** 唯一索引是最后一道防线：撞号就换一个重试，3 次仍失败才向调用方报冲突 */
-    private void insertWithTicketNoRetry(Ticket ticket) {
+    /**
+     * 插入工单。表上有两个唯一键，撞了要区分处理：
+     * <ul>
+     *   <li>uk_creator_idempotency：并发同 key，说明别人已经建好了，返回那一条（幂等重放）；</li>
+     *   <li>uk_ticket_no：单号撞了，换一个重试，3 次仍失败才报冲突。</li>
+     * </ul>
+     * 返回值与入参不是同一个对象，就表示走了幂等重放分支。
+     */
+    private Ticket insertOrReplay(Ticket ticket) {
         for (int attempt = 1; ; attempt++) {
             ticket.setTicketNo(generateTicketNo());
             try {
                 ticketMapper.insert(ticket);
-                return;
+                return ticket;
             } catch (DuplicateKeyException ex) {
+                if (ticket.getIdempotencyKey() != null) {
+                    // 必须是锁定读：普通 SELECT 在本事务的快照里看不到对方刚提交的行
+                    Optional<Ticket> existing = ticketMapper.findByCreatorAndIdempotencyKeyForUpdate(
+                            ticket.getCreatorId(), ticket.getIdempotencyKey());
+                    if (existing.isPresent()) {
+                        return existing.get();
+                    }
+                }
                 if (attempt >= TICKET_NO_MAX_ATTEMPTS) {
                     throw new BusinessException(ErrorCode.CONFLICT, "工单号生成冲突，请稍后重试");
                 }
@@ -302,6 +349,22 @@ public class TicketService {
         String date = LocalDate.now().format(DATE_FORMAT);
         int suffix = ThreadLocalRandom.current().nextInt(1000, 10000);
         return "T" + date + "-" + suffix;
+    }
+
+    /**
+     * 幂等键归一化：空值/空白视为"未启用幂等"（老客户端不带这个头）。
+     * 只做长度校验，不限制字符集——UUID、雪花串、前端自定义串都应该能用。
+     */
+    private String normalizeIdempotencyKey(String raw) {
+        if (isBlank(raw)) {
+            return null;
+        }
+        String key = raw.trim();
+        if (key.length() > IDEMPOTENCY_KEY_MAX_LENGTH) {
+            throw new BusinessException(ErrorCode.INVALID_PARAM,
+                    "Idempotency-Key 长度不能超过 " + IDEMPOTENCY_KEY_MAX_LENGTH + " 个字符");
+        }
+        return key;
     }
 
     private String normalizeCategory(String raw) {

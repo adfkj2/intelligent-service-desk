@@ -11,6 +11,21 @@ const router = useRouter()
 const formRef = ref(null)
 const submitting = ref(false)
 
+/**
+ * 本次填写的幂等键：进入页面时生成一个，创建成功后才重置。
+ * 为什么不是"每次点击都生成"：网络超时后用户再点一次，必须复用同一个 key 才能被后端识别成重放；
+ * 每次换 key 等于放弃了这层保护。
+ */
+const idempotencyKey = ref(newIdempotencyKey())
+
+function newIdempotencyKey() {
+  if (window.crypto?.randomUUID) {
+    return window.crypto.randomUUID()
+  }
+  // 旧浏览器兜底：时间戳 + 随机串，长度远小于后端 64 字符上限
+  return `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+}
+
 const form = reactive({
   title: '',
   description: '',
@@ -35,7 +50,9 @@ function submit() {
     }
     submitting.value = true
     try {
-      const created = await ticketApi.create({ ...form })
+      const created = await ticketApi.create({ ...form }, idempotencyKey.value)
+      // 成功后换新 key，避免"再建一单"被当成重放
+      idempotencyKey.value = newIdempotencyKey()
       ElMessage.success(`工单 ${created.ticketNo} 已创建`)
       router.replace({ name: 'ticket-detail', params: { id: created.id } })
     } catch (error) {

@@ -9,6 +9,7 @@ import com.isd.common.result.PageResponse;
 import com.isd.ticket.dto.AssignRequest;
 import com.isd.ticket.dto.ChangeStatusRequest;
 import com.isd.ticket.dto.CreateTicketRequest;
+import com.isd.ticket.dto.TicketCreationResult;
 import com.isd.ticket.dto.TicketResponse;
 import com.isd.ticket.entity.TicketOperationLog;
 import com.isd.ticket.service.TicketService;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -43,10 +45,25 @@ public class TicketController {
         this.currentUserProvider = currentUserProvider;
     }
 
+    /**
+     * 创建工单。
+     *
+     * 幂等：客户端可以带 {@code Idempotency-Key} 头，同一用户 + 同一 key 重复提交只落一条。
+     * 首次创建返回 201；命中幂等重放返回 200 并带 {@code Idempotent-Replay: true}，
+     * 让调用方（和日志）能区分"新建成功"和"重复请求被吸收"。
+     */
     @PostMapping
-    public ResponseEntity<ApiResponse<TicketResponse>> create(@Valid @RequestBody CreateTicketRequest request) {
-        TicketResponse created = ticketService.create(request, currentUserProvider.require());
-        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(created));
+    public ResponseEntity<ApiResponse<TicketResponse>> create(
+            @Valid @RequestBody CreateTicketRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        TicketCreationResult result = ticketService.create(request, currentUserProvider.require(), idempotencyKey);
+        ResponseEntity.BodyBuilder builder = result.replayed()
+                ? ResponseEntity.ok()
+                : ResponseEntity.status(HttpStatus.CREATED);
+        if (result.replayed()) {
+            builder.header("Idempotent-Replay", "true");
+        }
+        return builder.body(ApiResponse.ok(result.ticket()));
     }
 
     /**
