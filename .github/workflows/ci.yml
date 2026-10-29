@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   backend:
-    name: 后端（mvn verify）
+    name: 后端（./mvnw verify）
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -26,9 +26,13 @@ jobs:
           cache: maven
 
       # runner 自带 Docker，AbstractIntegrationTest 会启动 MySQL 8 与 Redis 7 容器；
-      # verify 同时覆盖编译、82 个用例与打 jar
+      # verify 同时覆盖编译、96 个用例、覆盖率门禁与打 jar
+      # 用 wrapper 而不是裸 mvn：Maven 版本由 .mvn/wrapper/maven-wrapper.properties 锁定
+      - name: 授权 mvnw
+        run: chmod +x mvnw
+
       - name: 测试并打包
-        run: mvn -B -ntp verify
+        run: ./mvnw -B -ntp verify
 
       # 失败时把 surefire 报告带出来，不用在几百行日志里翻断言
       - name: 上传测试报告
@@ -37,6 +41,15 @@ jobs:
         with:
           name: surefire-reports
           path: target/surefire-reports/
+          retention-days: 7
+
+      # 覆盖率报告无论成败都传：失败时恰恰最需要看哪一行没被覆盖
+      - name: 上传覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
           retention-days: 7
 
   frontend:
@@ -59,6 +72,29 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
+      # 先 lint 再构建：语法/未定义变量这类问题比"构建产物能不能生成"更早暴露
+      - name: 静态检查
+        run: npm run lint
+
       # 产物写进 ../src/main/resources/static，和本地构建一致
       - name: 构建
         run: npm run build
+
+  image:
+    name: 镜像（docker build）
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      # 不推送，只为拦住"只在本地机器能构建"的退化（缺文件、依赖本机 static、忘记 .dockerignore）
+      - name: 构建镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: isd:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
