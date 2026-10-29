@@ -2,19 +2,45 @@
 import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { KeyRound, ShieldCheck } from 'lucide-vue-next'
+import { ArrowLeft, KeyRound, LifeBuoy, LogOut, ShieldCheck } from 'lucide-vue-next'
 import { authApi } from '../api/auth'
 import { useUserStore } from '../stores/user'
+import AdminContactDialog from '../components/AdminContactDialog.vue'
 
 const router = useRouter()
 const store = useUserStore()
 const formRef = ref(null)
 const loading = ref(false)
+const loggingOut = ref(false)
+const contactVisible = ref(false)
 const oldPasswordError = ref('')
 
 const form = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
 
 const forced = computed(() => store.mustChangePassword)
+
+/**
+ * 逃生通道：忘记临时密码时退出当前账号，换别的账号或等管理员重新重置。
+ * 不携带 redirect 参数——登录页是终点，不能成为下一个账号的回跳来源。
+ * 后端 PasswordChangeInterceptor 已放行 /api/auth/logout，强制改密态下同样可用。
+ */
+async function handleLogout() {
+  loggingOut.value = true
+  try {
+    await store.logout()
+    ElMessage.success('已退出登录')
+  } catch (error) {
+    // 退出接口本身失败（例如会话已过期）不应阻塞用户离开，store.logout 的 finally 已清空本地用户态
+    console.error('退出登录失败', error)
+  } finally {
+    loggingOut.value = false
+    router.replace({ name: 'login' })
+  }
+}
+
+function backToWorkbench() {
+  router.replace({ name: 'workbench' })
+}
 
 const rules = {
   oldPassword: [{ required: true, message: '请输入原密码', trigger: 'blur' }],
@@ -142,10 +168,32 @@ function submit() {
           </el-button>
         </el-form>
 
-        <p class="mt-4 text-[11px] leading-5 text-ink-400">
-          当前账号：{{ store.user?.username }}。如无法修改，请联系管理员重新重置密码。
+        <div class="mt-3 flex items-center justify-between gap-3">
+          <el-button link type="primary" :icon="LogOut" :loading="loggingOut" @click="handleLogout">
+            {{ forced ? '退出登录，换个账号' : '退出登录' }}
+          </el-button>
+          <el-button v-if="!forced" link :icon="ArrowLeft" @click="backToWorkbench">
+            返回工作台
+          </el-button>
+        </div>
+
+        <div v-if="forced" class="mt-4 rounded-lg border border-line bg-white px-3.5 py-3">
+          <p class="m-0 text-[12px] font-medium text-ink-900">忘记临时密码了？</p>
+          <p class="m-0 mt-1 text-[11px] leading-5 text-ink-600">
+            临时密码只在重置弹窗里展示一次。可以退出登录请管理员重新重置，或直接查看管理员联系方式。
+          </p>
+          <el-button link type="primary" size="small" :icon="LifeBuoy" class="mt-1.5" @click="contactVisible = true">
+            联系管理员
+          </el-button>
+        </div>
+
+        <p class="mt-3 text-[11px] leading-5 text-ink-400">
+          当前账号：{{ store.user?.username }}。
+          {{ forced ? '未完成改密前只能停留在本页。' : '修改后需要用新密码重新登录。' }}
         </p>
       </div>
     </section>
+
+    <AdminContactDialog v-model="contactVisible" />
   </div>
 </template>

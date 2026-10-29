@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { CheckCircle2, ShieldCheck, Sparkles } from 'lucide-vue-next'
 import { useUserStore } from '../stores/user'
 import { authApi } from '../api/auth'
+import { safeRedirect } from '../utils/redirect'
 import AdminContactDialog from '../components/AdminContactDialog.vue'
 
 const route = useRoute()
@@ -51,8 +52,9 @@ function doLogin() {
         return
       }
       ElMessage.success('登录成功')
-      const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
-      router.replace(redirect)
+      // 只回跳到受控的站内业务页：登录页 / 改密页会被 safeRedirect 过滤成工作台，
+      // 否则任一账号登录后都可能被历史 redirect 参数拖回改密页。
+      router.replace(safeRedirect(route.query.redirect))
     } catch (error) {
       console.error('登录失败', error)
     } finally {

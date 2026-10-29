@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { safeRedirect } from '../utils/redirect'
 
 /**
  * 统一请求层。
@@ -35,9 +36,10 @@ service.interceptors.response.use(
       } else if (!url.includes('/auth/me')) {
         // /auth/me 的 401 是"未登录"的正常探测，交给路由守卫处理，不在这里提示与跳转
         ElMessage.warning('登录已失效，请重新登录')
-        // 整页跳转会重新初始化 Pinia，等价于清空会话 store，避免残留上一个用户的菜单与数据
-        const redirect = encodeURIComponent(window.location.pathname + window.location.search)
-        window.location.assign(`/login?redirect=${redirect}`)
+        // 整页跳转会重新初始化 Pinia，等价于清空会话 store，避免残留上一个用户的菜单与数据。
+        // 当前停在改密页/登录页时不带 redirect：那两条路径不能作为登录后的落点。
+        const redirect = safeRedirect(window.location.pathname + window.location.search, '')
+        window.location.assign(redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : '/login')
       }
     } else if (status === 403) {
       ElMessage.error(message || '没有权限执行该操作')
@@ -46,6 +48,9 @@ service.interceptors.response.use(
       ElMessage.warning(message || '数据已被他人修改，请刷新后重试')
     } else if (status === 404) {
       ElMessage.error(message || '资源不存在')
+    } else if (status === 429) {
+      // 登录失败次数过多被锁：后端文案里带剩余分钟数，直接用，别覆盖成"未知错误"
+      ElMessage.warning(message || '操作过于频繁，请稍后再试')
     } else {
       ElMessage.error(message)
     }

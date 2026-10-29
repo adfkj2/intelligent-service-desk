@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '../stores/user'
+import { safeRedirect } from '../utils/redirect'
 
 const routes = [
   {
@@ -76,7 +77,10 @@ router.beforeEach(async (to) => {
     // 刷新页面后 Pinia 是空的，用 /auth/me 从前端恢复会话；401 就回登录页
     const ok = await store.fetchMe()
     if (!ok) {
-      return { name: 'login', query: { redirect: to.fullPath } }
+      // 改密页、登录页不能作为回跳目标：否则换账号登录会被直接送回改密页，
+      // 看起来就像"新账号也被强制改密"。safeRedirect 对这类输入返回空串，此时不带 redirect 参数。
+      const redirect = safeRedirect(to.fullPath, '')
+      return { name: 'login', query: redirect ? { redirect } : {} }
     }
   }
 
