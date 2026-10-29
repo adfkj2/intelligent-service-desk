@@ -1,0 +1,38 @@
+# REST 接口快照（共 33 个 /api 接口）
+#
+# 由 ApiInventoryTest 守护：接口增删后这里必须同步，否则 CI 红。
+# 格式：METHOD /path，按字典序排列；# 开头为注释，读取时忽略。
+# 只统计 /api 开头的路由，SpaForwardController 的页面转发不计入。
+DELETE /api/kb/items/{id}
+GET /api/admin/users
+GET /api/auth/admin-contacts
+GET /api/auth/me
+GET /api/kb/categories
+GET /api/kb/items
+GET /api/kb/items/{id}
+GET /api/kb/search
+GET /api/notifications
+GET /api/notifications/unread-count
+GET /api/ping
+GET /api/tickets
+GET /api/tickets/stats/{status}
+GET /api/tickets/{id}
+GET /api/tickets/{id}/operations
+PATCH /api/admin/users/{id}/role
+PATCH /api/admin/users/{id}/status
+PATCH /api/notifications/{id}/read
+PATCH /api/tickets/{id}/status
+POST /api/admin/users/{id}/password/reset
+POST /api/ai/chat
+POST /api/auth/change-password
+POST /api/auth/login
+POST /api/auth/logout
+POST /api/auth/register
+POST /api/kb/categories
+POST /api/kb/items
+POST /api/notifications/read-all
+POST /api/tickets
+POST /api/tickets/{id}/assign
+POST /api/tickets/{id}/claim
+PUT /api/auth/me/contact
+PUT /api/kb/items/{id}
