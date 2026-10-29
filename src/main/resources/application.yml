@@ -13,9 +13,10 @@ spring:
   profiles:
     active: local
   datasource:
-    # createDatabaseIfNotExist：新环境不用先手工建库，Flyway 接着把表补齐
-    url: "jdbc:mysql://127.0.0.1:3306/isd?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
-    username: root
+    # createDatabaseIfNotExist：新环境不用先手工建库，Flyway 接着把表补齐。
+    # 整体走 DB_URL：容器里要指向 mysql 服务名，本机默认值保持不变（本地开发不用设任何环境变量）。
+    url: "${DB_URL:jdbc:mysql://127.0.0.1:3306/isd?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}"
+    username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:}
 
   data:
@@ -73,6 +74,14 @@ isd:
   ai:
     # 单次对话的硬超时（秒）：超过就走知识库降级，不能让用户干等
     timeout-seconds: 30
+    rate-limit:
+      # 成本护栏：每次对话都按 token 计费，没有配额等于对刷接口敞开大门
+      enabled: true
+      # 单用户每分钟配额：正常提问远达不到，连续刷才会撞上
+      max-per-user: 20
+      # 单 IP 分钟配额故意放宽：办公室 NAT 后大家共用一个出口
+      max-per-ip: 60
+      window-seconds: 60
   auth:
     login:
       # 同账号连续失败 5 次锁 15 分钟（主要防线：攻击者换 IP 也挡得住）
@@ -80,6 +89,28 @@ isd:
       # 同 IP 失败 20 次才锁：阈值故意放宽，办公室 NAT 后大家共用一个出口 IP
       max-failures-per-ip: 20
       lock-minutes: 15
+  notification:
+    relay:
+      # 发件箱投递节奏：每 5 秒取一批。fixedDelay，跑不完不叠加下一轮
+      interval-ms: 5000
+      # 启动后先等 10 秒，让 Flyway 迁移和应用预热先完成
+      initial-delay-ms: 10000
+      # 单批事件数：一次扫描的 PENDING 上限，积压时靠多轮消化
+      batch-size: 100
+      # 同一事件最多尝试 5 次，之后转 FAILED 等人工介入，避免毒消息占住队头
+      max-attempts: 5
+  retention:
+    # 数据保留策略：ai_chat_log / outbox_event / notification 都是只增不减的表
+    enabled: true
+    # 每天 03:30 跑，避开使用高峰（6 位：秒 分 时 日 月 周）
+    cron: "0 30 3 * * *"
+    # 分批删除：单批 1000 行，单轮最多 50 批 = 单表每天最多删 5 万行，积压靠次日消化
+    batch-size: 1000
+    max-batches: 50
+    # 保留天数取长值：宁可多占一点空间，也不要在首次上线时把历史数据一次删光
+    ai-log-days: 90
+    outbox-sent-days: 30
+    notification-read-days: 90
 
 mybatis:
   configuration:
