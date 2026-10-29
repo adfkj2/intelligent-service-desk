@@ -11,7 +11,8 @@
 | 检查项 | 命令 / 方式 | 期望 |
 |---|---|---|
 | MySQL 在跑 | 服务列表 `MySQL80` | 运行中 |
-| 表齐全 | `USE isd; SHOW TABLES;` | 5 张业务表 + `flyway_schema_history` |
+| 表齐全 | `USE isd; SHOW TABLES;` | 6 张业务表（含 `ai_chat_log`）+ `flyway_schema_history` |
+| Redis | `docker exec isd-redis redis-cli ping` | `PONG`（会话存储，没起它应用会启动失败） |
 | 应用启动 | `java -jar target/isd-0.0.1-SNAPSHOT.jar` | `Tomcat started on port 8081` |
 | 管理台 | 打开 `http://localhost:8081/` | 出现登录页（404/白屏说明没构建前端：`cd web && npm run build` 后重新打包） |
 | LLM Key | `src/main/resources/application-local.yml` | `spring.ai.openai.api-key` 非占位符 |
@@ -49,7 +50,7 @@ UPDATE isd.sys_user SET role = 'ADMIN' WHERE username = 'demo_admin';
 | 1 | 员工 | `demo_emp` 登录 | 进入工作台，4 张状态卡有数字 | Session 登录；统计复用列表接口，员工只统计自己的 |
 | 2 | 员工 | 新建工单：标题/分类/优先级/描述 | 提交后自动跳到详情，状态「待接单」 | DTO 校验、初始状态、时间线出现 CREATE |
 | 3 | 员工 | 我的工单页，输入关键词筛选 | 只出现自己提交的工单，分页由服务端返回 | 员工的数据范围由 Service 强制加 `creator_id`，前端传参绕不过 |
-| 4 | 员工 | 右下角打开 AI 助手，问「我的工单处理到哪了」 | 回答引用真实工单号，标注「模型回答」 | AI 工具从 SecurityContext 取身份，只查本人数据 |
+| 4 | 员工 | 右下角打开 AI 助手，问「我的工单处理到哪了」 | 回答引用真实工单号，标注「模型回答」，下方带「参考知识：…」 | AI 工具从 SecurityContext 取身份，只查本人数据；参考知识来自 FULLTEXT ngram 召回（RAG），每次问答落 `ai_chat_log` |
 | 5 | 技术支持 | 退出后用 `demo_sup` 登录 | 左侧菜单变成「工单池」，能看到全部工单 | 同一套页面按角色裁剪菜单；真正权限在后端 |
 | 6 | 技术支持 | 工单池点「接单」并二次确认 | 状态变「处理中」，处理人变成自己 | 状态机 + 乐观锁 UPDATE |
 | 7 | 技术支持 | 对同一单再点一次接单 | 右上角提示「工单已被他人接单…」而非报错页 | 409 是预期结果，用 warning 提示 |
@@ -58,6 +59,7 @@ UPDATE isd.sys_user SET role = 'ADMIN' WHERE username = 'demo_admin';
 | 10 | 管理员 | 退出后用 `demo_admin` 登录 | 菜单多出「用户管理」 | `/api/admin/**` 仅 ADMIN |
 | 11 | 管理员 | 用户管理把 `demo_emp2` 的角色「调整」为技术支持；再演示禁用开关 | 角色标签变「技术支持」，提示需重新登录；禁用后该账号无法登录 | 注册默认员工，提权只能管理员操作；不能改自己的角色与状态 |
 | 12 | 管理员 | 工单池对另一张待接单工单「指派」给 `demo_sup` | 状态「处理中」，处理人变为被指派人 | 指派校验角色与启用状态 |
+| 12.1 | 员工 | 新建工单时断网/连点两次「提交」 | 只产生一张工单 | 前端每次进入页面生成一个 `Idempotency-Key`，后端靠唯一索引吸收重复提交（重放返回 200 + `Idempotent-Replay`） |
 | 13 | 员工 | 换回 `demo_emp`，打开自己那张已解决工单点「确认关闭」 | 状态「已关闭」，时间线 4 条：CREATE/CLAIM/RESOLVE/CLOSE | 只有创建者（或管理员）能关闭；审计与状态同事务 |
 
 > 演示 AI 降级：把 `--isd.ai.timeout-seconds=1` 加到启动参数，第 4 步的回答会标注「知识库降级」并列出命中的条目标题，说明 **AI 挂了业务不受影响**。
@@ -71,7 +73,7 @@ UPDATE isd.sys_user SET role = 'ADMIN' WHERE username = 'demo_admin';
 | # | 角色 | 操作 | 期望 | 讲什么 |
 |---|---|---|---|---|
 | 1 | 未登录 | 登录页点「忘记密码？」 | 弹窗列出启用中管理员的姓名、手机号、邮箱，电话/邮箱可直接点，也可一键复制 | 每次打开都实时拉 `GET /api/auth/admin-contacts`，字段只有 `fullName/phone/email`，不含用户名与角色 |
-| 2 | 管理员 | 「用户管理」找到 `demo_emp2` 点「重置密码」并二次确认 | 结果弹窗用等宽字体展示 12 位一次性临时密码，带复制按钮 | 明文只出现这一次（`Cache-Control: no-store`），日志只记 `targetId/operatorId` |
+| 2 | 管理员 | 「用户管理」找到 `demo_emp2` 点「重置密码」并二次确认 | 结果弹窗用等宽字体展示 12 位一次性临时密码，带复制按钮 | 明文只出现这一次（`Cache-Control: no-store`），日志只记 `targetId/operatorId`；会话存 Redis，所以这一步在**任意实例**上都会让对方的旧会话立刻失效 |
 | 3 | 员工 | 另开无痕窗口用 `demo_emp2` + 临时密码登录 | 直接落到 `/change-password`，提示「首次登录需修改初始密码」 | 登录响应 `mustChangePassword=true`；此时直接请求 `/api/tickets` 返回 403 |
 | 4 | 员工 | 填「当前密码」= 临时密码，再填两遍新密码，提交 | 提示成功后进入工作台，可正常建单 | 改密成功重建 principal、轮换 session id，并踢掉该账号其他会话 |
 | 5 | 管理员 | 回到用户管理，看自己那一行的操作列 | 不出现「重置密码」按钮 | 服务端同样拒绝：管理员不能重置自己（409），忘记自己的密码只能找另一位管理员 |
@@ -174,12 +176,20 @@ Call 'Patch' "$base/api/tickets/$id/status" @{ action='CLOSE';   comment='问题
 | AI 查知识库 | source=LLM，引用条目 | 引用《打印机无法连接的处理步骤》编号 23 并给出排查步骤 |
 | AI 被要求建单 | 拒绝 | 「我目前只有查询权限，无法创建工单」 |
 | 管理员重置密码 | 200 + 12 位临时密码，旧密码失效 | 自动用例通过（`PasswordFlowTest`） |
-| 旧会话被踢 | 下一次请求 401 | 自动用例通过（`SessionRegistry` 标记过期） |
+| 旧会话被踢 | 下一次请求 401 | 自动用例通过（`SessionRedisTest`：会话记录已从 Redis 删除，而不只是内存里标记过期） |
 | 临时密码登录 | `mustChangePassword=true`，业务接口 403 | 自动用例通过 |
 | 改密后 | 标志清除，新密码可登录、临时密码 401 | 自动用例通过 |
 | 公开联系方式 | 仅启用管理员，且不含 `username` | 自动用例通过；清空联系方式保存 → 400 |
 
-> 密码闭环这几行由 `PasswordFlowTest`（真实 MySQL、5 个用例、类级事务回滚）覆盖，没有在演示数据上手工重置，避免把演示账号的会话踢掉。
+> 密码闭环这几行由 `PasswordFlowTest`（真实 MySQL、6 个用例、类级事务回滚）与 `SessionRedisTest`（真实 Redis，2 个用例）覆盖，没有在演示数据上手工重置，避免把演示账号的会话踢掉。
+
+补充三行不在主流程里的验证，问到时再答：
+
+| 场景 | 期望 | 依据 |
+|---|---|---|
+| 同一 `Idempotency-Key` 提交两次 | 只落一张，第二次 200 + `Idempotent-Replay: true` | `TicketIdempotencyTest`（5 个用例，含并发同 key） |
+| 同一账号连错 5 次密码 | 第 6 次即使密码正确也 429，提示剩余分钟数 | `LoginRateLimitTest`（3 个用例） |
+| AI 问答后可复盘 | `ai_chat_log` 里有 traceId、召回条数、工具调用次数、耗时 | `AiRagTest`（3 个用例） |
 
 AI 实测原文（节选）：
 

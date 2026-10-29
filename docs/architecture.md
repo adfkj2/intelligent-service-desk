@@ -25,7 +25,7 @@ AI 的边界尤其重要：**只读 + 建议**。模型能查工单、查知识�
 
 ```
 客户端(Swagger/前端)
-   │  HTTP + JSESSIONID
+   │  HTTP + SESSION Cookie（会话体存 Redis）
    ▼
 Spring Security 过滤器链
    ├─ 认证：从 Session 还原 SecurityContext
@@ -85,7 +85,7 @@ MySQL 8（InnoDB, utf8mb4）
 生产：浏览器 → localhost:8081 (Spring 同时提供 index.html 与 /api)
 ```
 
-两种形态下浏览器看到的都是**一个源**，`JSESSIONID` 属于同源 Cookie，`SameSite=Lax` 正常工作。因此 Spring 侧没有一行 CORS 配置，前端也不需要把凭证放进 localStorage（XSS 拿不到 HttpOnly Cookie，这是 Session 相对"前端存 JWT"的隐性便利）。
+两种形态下浏览器看到的都是**一个源**，`SESSION`（Spring Session 下发的会话 Cookie）属于同源 Cookie，`SameSite=Lax` 正常工作。因此 Spring 侧没有一行 CORS 配置，前端也不需要把凭证放进 localStorage（XSS 拿不到 HttpOnly Cookie，这是 Session 相对"前端存 JWT"的隐性便利）。
 
 ### 为什么要 SPA 回退
 
@@ -122,8 +122,14 @@ Vue Router 用 history 模式，URL 是 `/tickets/12` 这种可读路径。用�
   1. 单体、无多端诉求，Session 是安全默认值：注销即失效、服务端可随时踢人；
   2. JWT 需要自己解决"如何注销""如何续期""如何吊销"，本质是把 Session 的复杂度搬到了自己手里；
   3. 角色变更在 Session 下"重新登录即生效"，JWT 则要等 token 过期。
-- **代价**：多实例部署需要共享会话（Spring Session + Redis），这是未来水平扩展时的第一个改造点。
 - **细节**：手工登录必须自己 `securityContextRepository.saveContext(...)`（Spring Security 6 默认 `requireExplicitSave`），并调用 `changeSessionId()` 防会话固定攻击。
+- **落地：会话已外置到 Redis（P0-1）**。触发点是"重置密码后踢人"：内存 `SessionRegistryImpl` 只掌握本机会话，多实例部署时另一台上被重置的账号仍能继续用旧会话。
+  - 选型：`spring-session-data-redis` + `repository-type: indexed`。**indexed 是刚需而不是优化**——只有索引版仓库会维护 `principal name -> sessionId` 的 Set；Boot 3.5 默认的 `default` 仓库没有这个索引，`findByPrincipalName` 不可用，按用户找会话只能全库 `SCAN`。
+  - 失效方式：**删除会话记录**（`deleteById`），不是给 `SessionInformation` 打过期标记。标记法只对内存 registry 有效——Spring Session 的 `getAllSessions` 每次都从 Redis 现查、新建临时对象，`expireNow()` 改的那个对象转手就被丢弃。
+  - 连带清理：`SessionRegistryImpl` / `HttpSessionEventPublisher` / `maximumSessions(...)` 全部移除。后者依赖 `ConcurrentSessionFilter` 检查 `SessionInformation.isExpired()`，既然改走"删记录"，会话不存在时自然落到 `authenticationEntryPoint` 返回 401 JSON，语义更简单。
+  - 索引键是 `Authentication.getName()`（登录名），所以 `SessionRevoker` 从 `userId` 改成 `username`；两处调用点（重置密码、本人改密）本来就已加载完整 `User`。
+  - 代价：每个请求多一次 Redis 往返（Lettuce 连接复用，亚毫秒级）；Redis 挂掉应用起不来（刻意不做内存降级，否则会重新出现"本地能跑、线上踢人失效"的隐性差异）。
+  - 指标口径连带调整：`isd_sessions_active` Gauge 被删除（`getAllPrincipals()` 在 Spring Session 下直接抛 `UnsupportedOperationException`，精确值只能 `SCAN`），改为 `isd_sessions_started_total` / `isd_sessions_ended_total{reason}`，在线数在查询侧算差值。
 
 ### ADR-3 MyBatis，而不是 JPA
 
@@ -184,9 +190,9 @@ WHERE id=? AND status='OPEN' AND version=?
 
 ### ADR-9 检索用 LIKE，明确知道它用不上索引
 
-- `LIKE '%kw%'` 前置通配符使 B+ 树有序性失效，必然全表扫。
-- 之所以仍选它：数据量小、无分词需求、不引入额外组件。
-- **面试要能讲清**：`LIKE 'kw%'` 可用索引，`LIKE '%kw%'` 不可用；v2 用 `FULLTEXT ... WITH PARSER ngram`（中文三元分词）或 ES。
+- 列表页检索仍是 `LIKE '%kw%'`：前置通配符使 B+ 树有序性失效，必然全表扫。之所以保留：数据量小、要支持单字符查询，且列表 QPS 低。
+- **RAG 召回已换成 FULLTEXT ngram**（见 ADR-18）：全文索引解决"整句查不到"的问题，但查不出单字符与纯符号，所以两条路径并存而不是互相替换。
+- **面试要能讲清**：`LIKE 'kw%'` 可用索引，`LIKE '%kw%'` 不可用；`ngram` 解决中文无空格分词；再往上才是 embedding 语义召回。
 - 附带处理：用户输入里的 `%` `_` 必须转义，否则"搜一个 %"等于全表（通配符注入，不是 SQL 注入）。
 
 ### ADR-10 AI 只读 Agent：三层防线
@@ -200,7 +206,7 @@ WHERE id=? AND status='OPEN' AND version=?
 **工程细节**：
 
 1. **LLM 调用不能进事务**。一次调用可能几十秒，事务会占住连接把连接池打空。`AgentService` 无 `@Transactional`，工具自己开只读事务。
-2. **异步要传安全上下文**。为做超时把调用丢到线程池后，`SecurityContextHolder`（ThreadLocal）在新线程里是空的，工具会"未登录"。用 `DelegatingSecurityContextExecutorService` 包装线程池。
+2. **异步要传安全上下文**。为做超时把调用丢到线程池后，`SecurityContextHolder` 与 MDC（都是 ThreadLocal）在新线程里是空的：工具会"未登录"，日志会丢 traceId。用 `ThreadPoolTaskExecutor` + `TaskDecorator` 成对搬运并清理（`ContextPropagatingTaskDecorator`），顺带挂 `ExecutorServiceMetrics` 暴露队列长度。
 3. **降级有内容**。超时/异常/未配 Key 时返回知识库检索结果，并在响应里标 `source=FALLBACK`，让前端能提示"AI 暂不可用"，而不是让用户以为这是模型结论。
 
 ### ADR-11 管理端并发：行级 version + 跨行不变量加锁
@@ -216,7 +222,7 @@ WHERE id=? AND status='OPEN' AND version=?
 
 1. **幂等**。两个人把角色设成同一个值时，后到的那个应成功而不是 409：条件更新失败后用**加锁读**（`FOR UPDATE`）拿最新已提交值再判断，普通 SELECT 在 REPEATABLE READ 下还是旧快照。
 2. **加锁顺序**。按 `id` 排序加锁，避免 A 锁 B、B 锁 A 的循环等待；`idx_role_status` 让加锁范围可控。
-3. **会话不会自动失效**。角色存在 Session 里，改完必须对方重新登录才生效。`SessionRegistry` 只用在"重置密码后踢人"（ADR-12），没有顺带在改角色时踢——避免一次误操作把对方正在填的表单全部清空。
+3. **会话不会自动失效**。角色存在 Session 里，改完必须对方重新登录才生效。`SessionRevoker` 只用在"重置密码后踢人"（ADR-12），没有顺带在改角色时踢——避免一次误操作把对方正在填的表单全部清空。
 
 ### ADR-12 密码重置与强制改密：一次性临时密码 + 服务端拦截
 
@@ -224,10 +230,10 @@ WHERE id=? AND status='OPEN' AND version=?
 - **决策**：
   1. 管理员在用户管理页对**任意非本人**账号重置密码，服务端用 `SecureRandom` 生成 12 位临时密码（排除 `O/0/I/l/1` 等易混字符），BCrypt 入库，同时置 `must_change_password=1`；
   2. 明文只出现在这一次响应里（`Cache-Control: no-store`），日志只记 `targetId/operatorId`；
-  3. 重置后按用户 id 失效该账号全部会话（`SessionRegistry`）；
+  3. 重置后按登录名失效该账号全部会话（`SessionRevoker` → Redis `deleteById`，见 ADR-2）；
   4. 登录时把 `mustChangePassword` 读进 `LoginUser`，`PasswordChangeInterceptor` 拦住 `/api/**`，只放行 `/api/auth/change-password`、`/api/auth/me`、`/api/auth/logout`，其余 403 JSON。
 - **代价与取舍**：
-  - 会话注册表在 JVM 内存，多实例要换 Spring Session + Redis；
+  - 会话已外置 Redis（ADR-2），踢人是跨实例一致的；但会话删掉后对方只能重新登录，正在填的表单内容会丢；
   - 临时密码走线下渠道转告，系统不保证"送达"；
   - 管理员不能重置自己，忘记自己的密码只能找另一位管理员——这是"避免把自己锁在系统外"的同一套思路；
   - 改密成功要重建 principal、`saveContext`、`changeSessionId()` 轮换会话，并失效该账号其他会话；
@@ -244,8 +250,8 @@ WHERE id=? AND status='OPEN' AND version=?
 
 ### ADR-14 测试库：容器优先，本机回退
 
-- **背景**：68 个集成测试全部依赖真实 MySQL，要求每台机器都装好 MySQL80 并配好 `application-local.yml`，换机器或进 CI 就跑不起来。
-- **决策**：`AbstractIntegrationTest` 启动一个 `mysql:8.0.36` 单例容器，用 `@DynamicPropertySource` 覆盖数据源；探测不到 Docker 时不注册任何属性，回退 `spring.datasource.*`（本机库）。`ISD_TEST_NO_DOCKER=true` 可强制回退。
+- **背景**：82 个集成测试全部依赖真实 MySQL（会话外置后还依赖 Redis），要求每台机器都装好 MySQL80 并配好 `application-local.yml`，换机器或进 CI 就跑不起来。
+- **决策**：`AbstractIntegrationTest` 启动 `mysql:8.0.36` 与 `redis:7.4-alpine` 两个单例容器，用 `@DynamicPropertySource` 覆盖 `spring.datasource.*` 与 `spring.data.redis.*`；探测不到 Docker 时不注册属性，回退本机服务。`ISD_TEST_NO_DOCKER=true` 可强制回退。
 - **为什么容器放静态字段**：Spring 上下文会缓存复用，容器若随测试类停止，下一个复用同一上下文的测试类就连不上库。
 - **代价**：有 Docker 时每个测试 JVM 多 10–20 秒；没有 Docker 时探测会先等几秒再回退。
 - **CI**：GitHub Actions 两个 job 并行——后端 `mvn verify`（runner 自带 Docker，固定走容器模式），前端 `npm ci && npm run build`。
@@ -257,11 +263,41 @@ WHERE id=? AND status='OPEN' AND version=?
   1. **一个边界一个指标名，结果放标签**：如 `isd.ai.chat{result=success|timeout|error|empty|not_configured}`，而不是 5 个独立计数器——否则算降级率要跨指标拼分母。
   2. **比率不落库**：冲突率 = `conflicts / (transitions + conflicts)`，降级率从 `result != success` 派生。存比率会引入"分母口径漂移"和二次聚合错误。
   3. **标签只放有限枚举**（result/action/layer/tool），用户名、工单号、IP 一律只进日志，避免时间序列爆炸。
-  4. **Gauge 只表示瞬时量**（活跃会话、线程池队列），累计量一律 Counter。
+  4. **Gauge 只表示瞬时量**（线程池队列与活跃线程），累计量一律 Counter。会话故意不做 Gauge：会话在 Redis，进程内枚举不到（`getAllPrincipals()` 在 Spring Session 下抛 `UnsupportedOperationException`），精确值只能 `SCAN`，那种"抓一次指标阻塞一次"的代价划不来，改成 started/ended 两个 Counter 在查询侧算差值。
   5. **工具层单独埋点**：Spring AI 会捕获工具异常并把错误文本交给模型，端到端仍是 success，只有 `isd.ai.tool.calls` 能看出失败；埋点时异常必须原样抛出，否则会改变模型看到的结果。
   6. **指标端点独立端口 8082 并绑 127.0.0.1**：不放进 8081，也就不需要往 Security 白名单里开口子，避免指标匿名可读。
 - **代价**：多一个 Tomcat 连接器；标签枚举靠人维护，写错名字会变成"指标静默缺失"，所以用 `SimpleMeterRegistry` 的差值断言把关键指标测住。
 - **不做**：OpenTelemetry Collector、Jaeger、ELK。单体没有跨服务调用链，traceId（MDC）+ Prometheus 指标已足够。
+
+### ADR-16 创建工单幂等：唯一索引是最终裁判
+
+- **背景**：用户双击「提交」、前端超时后重试、网关重发，都会产生两条一模一样的工单。只在 Service 里"先查再插"挡不住并发。
+- **决策**：客户端可带 `Idempotency-Key` 头（可选，≤64 字符），`ticket` 上加 `(creator_id, idempotency_key)` 唯一索引（V2）。命中重复时返回已有工单：首次 `201`，重放 `200` + `Idempotent-Replay: true`。
+- **为什么允许 NULL**：MySQL 唯一索引对 NULL 不去重，所以不带 key 的历史行为完全不变；幂等是增量能力，不是破坏性改造。
+- **踩到的坑（值得讲）**：并发同 key 时，第二个 INSERT 会等第一个事务提交，然后抛唯一键冲突；但本事务的快照早在进入方法时就建立了（前面的普通 SELECT），REPEATABLE READ 下再普通查**看不到**那一行，会被误判成"工单号冲突"。修法是用锁定读（`FOR UPDATE`，当前读）重新查一次。
+- **另一个细节**：`insertOrReplay` 要区分两个唯一键——`uk_creator_idempotency` 表示"别人已经建好了，返回它"，`uk_ticket_no` 才是"换一个单号重试"。
+- **代价**：每个带 key 的请求多一次等值查询（走唯一索引）；key 不做服务端过期清理，存储成本可忽略。
+
+### ADR-17 登录防爆破：Redis 计数，账号为主、IP 为辅
+
+- **背景**：登录接口此前只有失败计数指标，没有锁定——撞库可以无限重试；指标只能事后告警，挡不住当下。
+- **决策**：`LoginAttemptGuard` 用 Redis 两个 key 维度计数（窗口 = 锁定时长 15 分钟）：同账号 5 次失败即锁；同 IP 20 次失败即锁。锁定期间**先判锁再验证凭据**，连"密码对不对"都不返回，避免把登录接口变成密码探测器。
+- **为什么账号维度是主防线**：攻击者换 IP 成本极低，但换不掉他要打的那个账号。
+- **为什么 IP 阈值放宽到 20**：办公室 NAT 后所有人共用一个出口 IP，阈值太严会把正常同事一起锁死。
+- **为什么计量只在 `AuthenticationException` 上做**：`DisabledException` 说明密码是对的，只是账号被禁用；计入失败会让"被禁用的用户反复试密码把自己锁住"。
+- **为什么成功登录只清账号计数、不清 IP 计数**：否则攻击者只要手里有一个正常账号，就能定期"洗白"自己的 IP。
+- **代价**：共享出口 IP 的规模化公司需要按实际调大 IP 阈值，或改成网关注入的可信头（现在只读 `remoteAddr`，因为 `X-Forwarded-For` 客户端可伪造）。
+
+### ADR-18 RAG：FULLTEXT 召回 + 审计，一步到位但不一次到顶
+
+- **背景**：原实现把用户整句当关键词做 `LIKE`，命中率极低；且 AI 问答没有任何落库记录，答错无法复盘。
+- **决策（召回层）**：`kb_item(title, content, tags)` 加 FULLTEXT 索引并用 `WITH PARSER ngram`（V3）。`KbService.retrieve` 先全文检索 top-3，为空时退回 `LIKE`（单字/纯符号在 ngram 下查不出来）。
+- **为什么不上向量库**：语料几百条，ngram 召回够用，且不需要 embedding 模型与向量库运维。真正的触发条件是"语料上千 + 需要同义/跨语言召回"，届时只换 `retrieve` 的实现，上层不动。
+- **决策（提示词）**：召回结果拼进 **user 消息**而不是 system——system 是固定的行为约束，动态内容塞进去会污染规则；同时把"可能只有部分相关，不要照抄"写进前缀，降低模型把参考当结论的概率。单条正文截断 400 字，避免长条目吃掉上下文。
+- **决策（审计）**：新增 `ai_chat_log`（V4），记录 traceId、用户、问题（截 500 字）、回答、来源、召回条数、工具调用次数、耗时、是否降级。写入走旁路，失败只 WARN——审计丢失远好过用户拿不到答案。
+- **工具调用次数怎么来的**：工具跑在 `aiExecutor` 线程上，用 `ToolCallContext` 把同一个 `AtomicInteger` 的引用绑到该线程（ThreadLocal 只传引用，计数本身线程安全），请求线程在 future 完成后读结果。
+- **踩到的坑**：InnoDB 的全文索引在行**提交后**才进入检索视图，所以 `AiRagTest` 不能加 `@Transactional`（否则种子数据永远查不到，得到"召回永远为空"的假阴性），改成 `itest-` 前缀 + `@AfterEach` 清理。
+- **代价**：审计表存了问答原文，属于内部数据，需要保留策略；`ai_chat_log` 目前没有自动清理任务。
 
 ---
 
@@ -270,10 +306,11 @@ WHERE id=? AND status='OPEN' AND version=?
 | 表 | 关键索引 | 说明 |
 |---|---|---|
 | `sys_user` | `uk_username`、`idx_role_status` | 角色存字符串（可读性优于 0/1/2）；`phone/email` 供登录页展示管理员联系方式，`must_change_password` 标记"临时密码未改" |
-| `ticket` | `uk_ticket_no`、`idx_creator`、`idx_assignee`、`idx_status_created` | 最后一个服务"工作台按状态+时间"查询 |
+| `ticket` | `uk_ticket_no`、`uk_creator_idempotency`、`idx_creator`、`idx_assignee`、`idx_status_created` | 最后一个服务"工作台按状态+时间"查询；幂等键唯一索引允许 NULL，历史数据不受影响 |
 | `ticket_operation_log` | `idx_ticket(ticket_id, created_at)` | 审计查询 |
 | `kb_category` | `uk_name` | 分类名唯一 |
-| `kb_item` | `idx_category`、`idx_created_by`、`idx_title` | 标题索引对 `%kw%` 无效，保留供前缀查询 |
+| `kb_item` | `idx_category`、`idx_created_by`、`idx_title`、`ft_kb_item(FULLTEXT, ngram)` | 标题索引对 `%kw%` 无效，保留供前缀查询；全文索引供 RAG 召回 |
+| `ai_chat_log` | `idx_user_created`、`idx_trace` | AI 问答审计；`question` 截断 500 字，`answer` 存全文 |
 | `flyway_schema_history` | 主键 `installed_rank` | Flyway 元数据：已应用版本、校验和、耗时；业务代码不读 |
 
 **不建物理外键**：单表操作与测试造数更灵活，一致性由 Service 保证。代价是脏数据风险，需靠应用层校验（如指派前校验 assignee 存在且角色为 SUPPORT）。
@@ -302,8 +339,8 @@ WHERE id=? AND status='OPEN' AND version=?
 | 优先级 | 事项 | 触发条件 |
 |---|---|---|
 | 高 | AI 频率限制 + 会话记忆 | 对外开放或成本敏感时 |
-| 高 | 检索换 FULLTEXT ngram | 条目数上万 |
-| 中 | 多实例：Spring Session + Redis | 需要水平扩容 |
+| 高 | 语义召回（embedding + 向量库）替代 ngram | 语料上千，或同义/跨语言召回成为主要痛点 |
+| 中 | 多实例部署（会话已外置 Redis，还缺负载均衡与会话粘性验证） | 需要水平扩容 |
 | 中 | 知识条目软删除 + 版本 | 有内容合规要求 |
 | 低 | 工单号换雪花算法 | 单日工单破百 |
 | 低 | 通知（站内信 / 邮件） | 有真实用户后 |

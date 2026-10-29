@@ -25,8 +25,8 @@ jobs:
           java-version: '21'
           cache: maven
 
-      # runner 自带 Docker，AbstractIntegrationTest 会启动 MySQL 8 容器；
-      # verify 同时覆盖编译、64 个用例与打 jar
+      # runner 自带 Docker，AbstractIntegrationTest 会启动 MySQL 8 与 Redis 7 容器；
+      # verify 同时覆盖编译、82 个用例与打 jar
       - name: 测试并打包
         run: mvn -B -ntp verify
 
