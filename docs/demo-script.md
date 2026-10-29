@@ -11,7 +11,7 @@
 | 检查项 | 命令 / 方式 | 期望 |
 |---|---|---|
 | MySQL 在跑 | 服务列表 `MySQL80` | 运行中 |
-| 表齐全 | `USE isd; SHOW TABLES;` | 6 张业务表（含 `ai_chat_log`）+ `flyway_schema_history` |
+| 表齐全 | `USE isd; SHOW TABLES;` | 8 张业务表（含 `ai_chat_log` / `outbox_event` / `notification`）+ `flyway_schema_history` |
 | Redis | `docker exec isd-redis redis-cli ping` | `PONG`（会话存储，没起它应用会启动失败） |
 | 应用启动 | `java -jar target/isd-0.0.1-SNAPSHOT.jar` | `Tomcat started on port 8081` |
 | 管理台 | 打开 `http://localhost:8081/` | 出现登录页（404/白屏说明没构建前端：`cd web && npm run build` 后重新打包） |

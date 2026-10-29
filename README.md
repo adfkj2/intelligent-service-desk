@@ -16,8 +16,9 @@
 | 工单 | 创建（**Idempotency-Key 幂等**）、分页多条件查询、详情、接单、指派、状态流转、操作历史（审计）、**并发接单保护（乐观锁）** |
 | 知识库 | 分类管理、条目 CRUD（创建者本人或管理员才能改删）、关键词检索、**FULLTEXT ngram 全文检索**、分页列表 |
 | AI 助手 | DeepSeek（OpenAI 兼容协议）+ Function Calling，两个只读工具：查当前用户工单、检索知识库；**RAG：先全文召回再拼提示词**；超时/异常自动降级为知识库检索；**每次问答落审计表** |
-| 管理台 | Vue 3 + Vite 桌面前端：工作台统计、工单列表/详情/新建、知识库、用户管理、全局 AI 抽屉；按角色显示菜单，构建产物打进同一个 jar |
-| 工程 | 统一响应与全局异常、参数校验、Springdoc 在线接口文档、Flyway 版本化迁移、Testcontainers 测试库、GitHub Actions、Micrometer 指标与 traceId 日志、**登录失败限流（Redis）**、82 个自动化测试（含并发冲突与幂等用例） |
+| 站内信 | 接单 / 指派 / 状态变更自动通知相关人（**Transactional Outbox**：事件与业务同事务落库，调度器异步投递）；多实例靠 `(event_id, user_id)` 唯一索引幂等、重试有上限转 `FAILED`；未读数、单条/全部已读（越权 404） |
+| 管理台 | Vue 3 + Vite 桌面前端：工作台统计、工单列表/详情/新建、知识库、用户管理、**消息铃铛（未读数 + 下拉列表）**、全局 AI 抽屉；按角色显示菜单，构建产物打进同一个 jar |
+| 工程 | 统一响应与全局异常、参数校验、Springdoc 在线接口文档、Flyway 版本化迁移、Testcontainers 测试库、GitHub Actions、Micrometer 指标与 traceId 日志、**登录失败限流（Redis）**、**AI 配额限流（用户/IP 双维度）**、**数据保留清理（定时分批删除）**、96 个自动化测试（含并发冲突与幂等用例） |
 
 ---
 
@@ -38,7 +39,7 @@
 | Redis | 7.4（`docker compose`） | 会话共享存储；本地容器名 `isd-redis` |
 | springdoc-openapi | 2.8.9 | Swagger UI |
 | 前端 | Vue 3.5 + Vite 5 + Element Plus 2.9 + Pinia + Tailwind | 独立 `web/` 工程，`npm run build` 产出到 `src/main/resources/static` |
-| 测试 | JUnit 5 + MockMvc + AssertJ | 82 个用例 |
+| 测试 | JUnit 5 + MockMvc + AssertJ | 96 个用例 |
 
 ---
 
@@ -49,7 +50,7 @@
 - JDK 21
 - MySQL 8（本地 3306，服务名 `MySQL80`）
 - **Redis 7（会话存储，默认 `127.0.0.1:6379`）**：仓库根目录 `docker compose up -d` 一键起
-- Maven 3.9（也可直接用 IDEA 内置 Maven）
+- **无需安装 Maven**：仓库自带 Maven Wrapper（`mvnw` / `mvnw.cmd`，锁定 3.9.16），首次运行自动下载到 `~/.m2/wrapper/`；用 IDEA 的话内置 Maven 也能直接跑
 - Node 18+（**只有改前端时才需要**；只想跑现成页面可跳过）
 - Docker Desktop（跑测试时用来起 MySQL / Redis 容器；没有就自动回退本机服务）
 
@@ -63,9 +64,9 @@
 - 新环境：JDBC URL 带 `createDatabaseIfNotExist=true`，连上即自动建库 + 建表，不用手工跑 SQL；
 - 想手工建库：执行 `src/main/resources/db/bootstrap.sql`（只有 `CREATE DATABASE`）；
 - 老库：首次启动以 `baseline-version: 1` 打基线，不会重复建表，也不影响已有数据；V2 之后的增量迁移会照常执行；
-- 改结构：新增 `V2__xxx.sql` 之类的迁移，**不要改已执行过的旧脚本**（校验和会变，Flyway 会拒绝启动）。
+- 改结构：新增 `V7__xxx.sql` 之类的迁移，**不要改已执行过的旧脚本**（校验和会变，Flyway 会拒绝启动）。
 
-现有 4 个迁移、6 张业务表：
+现有 6 个迁移、8 张业务表：
 
 | 版本 | 内容 |
 |---|---|
@@ -73,6 +74,8 @@
 | `V2__ticket_idempotency.sql` | `ticket.idempotency_key` + 唯一索引 `uk_creator_idempotency`（创建工单幂等） |
 | `V3__kb_fulltext_index.sql` | `kb_item` 的 FULLTEXT 索引（ngram 分词，供 RAG 召回） |
 | `V4__ai_chat_log.sql` | `ai_chat_log`（AI 问答审计） |
+| `V5__outbox_and_notification.sql` | `outbox_event`、`notification`（Transactional Outbox + 站内信） |
+| `V6__retention_indexes.sql` | `ai_chat_log`、`notification` 的清理索引（保留策略按时间分批删） |
 
 外加 Flyway 自己的 `flyway_schema_history`。
 
@@ -115,10 +118,21 @@ npm run dev
 docker compose up -d
 
 # IDEA：直接运行 com.isd.IsdApplication
-# 命令行：
-mvn -DskipTests package
+# 命令行（Windows；macOS/Linux 用 ./mvnw）：
+.\mvnw.cmd -DskipTests package
 java -jar target/isd-0.0.1-SNAPSHOT.jar
 ```
+
+> `mvnw` 是 Maven Wrapper：仓库锁定了 Maven 3.9.16，第一次执行会把发行包（约 9 MB）下到 `~/.m2/wrapper/dists/`，之后等同本机装了 Maven，不再联网。CI 里也用 `./mvnw`，所以「你本地 3.9.x、CI 上 3.8」这类版本漂移不会发生。
+>
+> 国内网络下载 central 慢时，用环境变量换源即可（不必改仓库里的文件）：
+>
+> ```powershell
+> $env:MVNW_REPOURL="https://maven.aliyun.com/repository/public"
+> .\mvnw.cmd verify
+> ```
+>
+> 注意 wrapper 的缓存目录按 URL 哈希分目录，**换源后首次会重新下载一份**；想一直用镜像就把这条环境变量设到用户级环境变量里，别只在单次命令里 export。
 
 端口 **8081**（8080 被本机 Apache 占用）。
 
@@ -150,6 +164,43 @@ UPDATE sys_user SET role = 'ADMIN' WHERE username = 'demo_admin';
 管理员不能修改自己的角色，避免误操作把自己降权后失去管理入口；系统也会拒绝降级/禁用**最后一个启用状态的管理员**。两个管理员同时操作同一账号时，后到的一方会收到 409「已被其他管理员修改」，页面自动刷新后重试即可。
 
 完整演示步骤见 [docs/demo-script.md](docs/demo-script.md)。
+
+### 8. 一条命令起全栈（可选，不装 MySQL 也能跑）
+
+本机开发、全栈容器、仅打包三种方式按需选一种：
+
+| 方式 | 命令 | 适用 |
+|---|---|---|
+| 本机开发 | `docker compose up -d` + IDEA 运行 `IsdApplication` | 改代码热更新；MySQL 用本机 `MySQL80` |
+| **全栈容器** | `docker compose -f docker-compose.stack.yml up -d --build` | 新机器、演示、验收；MySQL 与 Redis 都在容器里 |
+| 仅打包 | `./mvnw -DskipTests package`（需先 `cd web && npm run build`） | 只要一个可运行的 jar |
+
+> 两个 compose 文件都在仓库根目录，属于同一个 compose 项目（服务名 `redis` 也同名），**只能二选一，不要同时启动**：`docker-compose.yml` 只起一个映射 6379 的 Redis（本地开发用），`docker-compose.stack.yml` 起 MySQL + Redis + 应用且不占宿主机 3306/6379，所以全栈栈可以和你本机的 MySQL80 共存。切回去之前先 `docker compose -f docker-compose.stack.yml down`。
+
+全栈栈包含三个服务：`mysql`（8.0.36，数据卷 `isd-mysql-data`）、`redis`（7.4，开启 `notify-keyspace-events`）、`app`（本仓库 `Dockerfile` 构建，`8081:8081`）。`app` 用 `depends_on: service_healthy` 等两个依赖真的可用再启动，Flyway 随后自动建库建表（8 张业务表）。
+
+```bash
+docker compose -f docker-compose.stack.yml up -d --build
+docker compose -f docker-compose.stack.yml ps          # 三个服务应都是 healthy
+curl http://localhost:8081/api/ping                    # {"code":0,...}
+docker compose -f docker-compose.stack.yml logs -f app # 排错
+docker compose -f docker-compose.stack.yml down        # 保留数据卷
+docker compose -f docker-compose.stack.yml down -v     # 连数据一起删
+```
+
+进容器查库：`docker compose -f docker-compose.stack.yml exec mysql mysql -uroot -p isd`。
+
+**镜像本身**（`Dockerfile`，三阶段：Node 构建前端 → Maven 打包 → JRE 运行）：
+
+```bash
+docker build -t isd:local .
+# 国内网络若拉不到基础镜像或 Maven 依赖，换镜像源：
+docker build --build-arg MAVEN_MIRROR_URL=https://maven.aliyun.com/repository/public -t isd:local .
+```
+
+- 前端在镜像内构建：`src/main/resources/static/` 被 `.gitignore` 排除，镜像不能依赖本机是否构建过前端；
+- 运行时用非 root 用户 `isd`，`HEALTHCHECK` 打容器内 `127.0.0.1:8082/actuator/health`（管理端口只绑本机，所以宿主机访问不到 8082，健康状态看 `docker ps` 的 `(healthy)`）；
+- `.dockerignore` 排除了 `target/`、`web/node_modules/`、`static/` 与 `application-local.yml`（含真实密码/Key），构建上下文只有几 MB，也不会把密钥打进镜像。
 
 ---
 
@@ -189,6 +240,8 @@ UPDATE sys_user SET role = 'ADMIN' WHERE username = 'demo_admin';
 
 统一响应：`{"code": 0, "message": "OK", "data": ...}`，HTTP 状态码保留 2xx/400/401/403/404/409/429/500 语义。
 
+共 **33** 个 `/api` 接口。清单由 `ApiInventoryTest` 与 `src/test/resources/api-endpoints.txt` 逐行守护——增删接口没同步文档时 CI 会直接失败。
+
 | 模块 | 方法 | 路径 | 权限 |
 |---|---|---|---|
 | 认证 | POST | `/api/auth/register` | 公开 |
@@ -214,7 +267,11 @@ UPDATE sys_user SET role = 'ADMIN' WHERE username = 'demo_admin';
 | 知识库 | PUT | `/api/kb/items/{id}` | 创建者 / ADMIN |
 | 知识库 | DELETE | `/api/kb/items/{id}` | 创建者 / ADMIN |
 | 知识库 | GET | `/api/kb/search?q=&page=&size=` | 登录 |
-| AI | POST | `/api/ai/chat` | 登录 |
+| AI | POST | `/api/ai/chat` | 登录（超过配额 429，消息带剩余秒数） |
+| 站内信 | GET | `/api/notifications?limit=` | 登录（仅自己） |
+| 站内信 | GET | `/api/notifications/unread-count` | 登录（仅自己） |
+| 站内信 | PATCH | `/api/notifications/{id}/read` | 登录（仅自己，别人的返回 404） |
+| 站内信 | POST | `/api/notifications/read-all` | 登录（仅自己） |
 | 用户管理 | GET | `/api/admin/users` | ADMIN |
 | 用户管理 | PATCH | `/api/admin/users/{id}/status` | ADMIN |
 | 用户管理 | PATCH | `/api/admin/users/{id}/role` | ADMIN |
@@ -276,11 +333,12 @@ src/main/java/com/isd/
 └── ai/                模块 D：client（LLM 适配器）/ tools（只读工具）/ service / controller / dto
 
 src/main/resources/
-├── db/migration/      Flyway 迁移脚本（V1__init_schema.sql；改结构就新增 V2）
+├── db/migration/      Flyway 迁移脚本（V1–V6；改结构就新增 V7）
 ├── db/bootstrap.sql   只建库（可选，日常用 createDatabaseIfNotExist）
 └── static/            前端构建产物（npm run build 生成，已 git 忽略）
 
-.github/workflows/ci.yml   后端 mvn verify（Testcontainers）+ 前端 npm build
+.github/workflows/ci.yml   后端 ./mvnw verify（Testcontainers）+ 前端 npm lint/build + 镜像构建
+mvnw / mvnw.cmd / .mvn/    Maven Wrapper，锁定 Maven 3.9.16，免装 Maven
 
 web/                   前端工程（独立 npm 包，构建产物回灌 src/main/resources/static）
 ├── vite.config.js     /api 代理到 8081；outDir 指向后端 static
@@ -318,6 +376,10 @@ web/                   前端工程（独立 npm 包，构建产物回灌 src/ma
 | 权限边界 | 前端隐藏按钮 ≠ 权限 | 可见性由 Service 的 `requireVisible` / `requireRole` 决定，前端裁剪只是减少误点 |
 | 管理端并发 | `version` 条件更新 + 管理员行锁 | 同一行覆盖用乐观锁；两个管理员互降导致 0 管理员，用按 id 排序的跨行锁兜底 |
 | 密码重置 | 一次性临时密码 + 服务端强制改密 | 明文只在响应里出现一次；`SessionRevoker` 按登录名删 Redis 会话；未改密时 `/api/**` 只放行改密、me、logout、管理员联系方式 |
+| 通知 | Transactional Outbox + 站内信 | 事件与业务变更同事务落库，调度器异步投递；多实例靠 `uk_event_user` 幂等，不引 MQ 与分布式锁 |
+| 前端消息 | 轮询未读数（30s）+ 点开拉列表 | 通知不是聊天，长连接/SSE 的收益抵不上运维成本；页面不可见时跳过轮询 |
+| AI 成本护栏 | Redis 固定窗口，用户 20/min + IP 60/min | 每次对话按 token 计费，没配额等于对刷接口敞开；固定窗口的边界误差换实现简单，对"防成本失控"足够 |
+| 数据保留 | 每日 03:30 分批 `DELETE ... LIMIT` | 只删已读通知、`SENT` 事件、超期审计；单批 1000 行避免长事务锁表，积压靠次日消化 |
 | 缓存 / MQ / 微服务 | 不做 | 没有真实业务收益，堆技术名词在面试里是负资产 |
 
 ---
@@ -325,8 +387,11 @@ web/                   前端工程（独立 npm 包，构建产物回灌 src/ma
 ## 测试
 
 ```bash
-mvn test
+./mvnw test      # 只跑测试（Windows 上敲 .\mvnw.cmd test）
+./mvnw verify    # 测试 + 覆盖率报告与门禁（报告在 target/site/jacoco/index.html）
 ```
+
+覆盖率门禁：JaCoCo **行覆盖 ≥ 90%**（实测基线 91.90%，分支 71.76%），不达标 `./mvnw verify` 直接失败，报告随 CI 产物可下载。
 
 | 测试类 | 用例数 | 覆盖内容 |
 |---|---|---|
@@ -338,9 +403,14 @@ mvn test
 | `PasswordFlowTest` | 6 | 重置密码、旧会话失效、临时密码强制改密、强制改密态的退出/联系方式、公开联系方式、清空联系方式校验 |
 | `LoginRateLimitTest` | 3 | 连错 5 次锁定（第 6 次正确密码也 429）、成功登录清零计数、IP 维度独立锁定 |
 | `UserRoleConcurrencyTest` | 2 | 并发改同一用户角色（version 只加 1）、过期 version 更新被拒 |
-| `SchemaMigrationTest` | 1 | Flyway 已应用 V1、5 张业务表与 sys_user 关键字段齐全 |
+| `SchemaMigrationTest` | 1 | Flyway 已应用 V1~V6、全部业务表与关键索引（幂等键、全文索引、`uk_event_user`、清理索引）齐全 |
+| `ApiInventoryTest` | 1 | `/api` 路由清单与快照逐行比对，接口增删未同步文档时 CI 失败 |
+| `NotificationApiTest` | 5 | 只返回本人通知、未读数、标记已读、越权 404 且数据不变、全部已读不波及他人 |
+| `NotificationRelayTest` | 2 | 同一事件重复投递只落一条（唯一索引兜底）、坏 payload 重试到上限转 `FAILED` |
 | `TraceIdFilterTest` | 3 | traceId 生成、合法值透传、非法/超长值丢弃 |
 | `MetricsApiTest` | 1 | 登录失败与 URL 级越权各计一次数（差值断言） |
+| `AiRateLimitTest` | 3 | 用户维度第 3 次 429 且不触发模型调用、IP 维度独立拦截、关闭开关后放行 |
+| `DataRetentionTest` | 3 | 只删过期 AI 审计 / 过期 `SENT` / 过期已读通知，`PENDING`、`FAILED`、未读、未过期全部保留 |
 | `KbApiTest` | 7 | 分类/条目 CRUD、归属权限、检索、通配符转义、OpenAPI 可达 |
 | `AiAgentTest` | 5 | 模型正常/异常/空回答降级、参数校验、未登录 |
 | `AiNotConfiguredTest` | 1 | 未配置 Key 时直接降级，且不发起模型调用（`verifyNoInteractions`） |
@@ -349,7 +419,7 @@ mvn test
 | `AiRagTest` | 3 | 召回内容进入提示词、审计字段与真实分支一致、未命中不硬塞上下文 |
 | `SessionRedisTest` | 2 | 会话真的落在 Redis、重置密码删光该账号全部会话、本人改密只保留当前会话 |
 
-合计 **82** 个用例。并发用例刻意不加 `@Transactional`——事务是连接级的，两个线程各自提交才能测出真实冲突；指标断言一律用**差值**，因为 Spring 上下文复用、计数器不会在测试之间清零。
+合计 **96** 个用例。并发用例刻意不加 `@Transactional`——事务是连接级的，两个线程各自提交才能测出真实冲突；指标断言一律用**差值**，因为 Spring 上下文复用、计数器不会在测试之间清零。
 
 > `AiRagTest` 也不能加 `@Transactional`：InnoDB 的全文索引在行提交后才进入检索视图，
 > 测试事务里的种子数据永远查不到，会得到"召回永远为空"的假阴性。改为 `itest-` 前缀 + `@AfterEach` 手工清理。
@@ -359,7 +429,11 @@ mvn test
 > 会话外置后，测试里不能再强转 `MockHttpSession`（拿到的是 Spring Session 的包装类），统一走
 > `TestSessions` 工具：登录后取 `SESSION` Cookie，后续请求带 Cookie——顺带覆盖了 Cookie 下发这一步。
 
-CI 在 `.github/workflows/ci.yml`：后端 job 跑 `mvn verify`（runner 自带 Docker，固定走容器模式），前端 job 跑 `npm ci && npm run build`。
+CI 在 `.github/workflows/ci.yml`，三个 job 都是硬门禁：
+
+- **后端**：`./mvnw verify`（runner 自带 Docker，固定走容器模式），一次覆盖编译、96 个用例、JaCoCo 覆盖率检查与打 jar；失败的 surefire 报告和每次都生成的 `target/site/jacoco/` 都会作为产物上传；
+- **前端**：`npm ci` → `npm run lint`（ESLint 9 flat config，未定义变量、`v-for` 缺 `:key` 这类真问题为 error）→ `npm run build`；
+- **镜像**：`docker build`（不推送），专门拦住「只在本地机器能构建」的退化——缺文件、依赖本机 `static/`、忘写 `.dockerignore` 都会在这一步暴露。
 
 ---
 
@@ -368,12 +442,12 @@ CI 在 `.github/workflows/ci.yml`：后端 job 跑 `mvn verify`（runner 自带 
 - 列表页检索仍是 `LIKE '%kw%'`（无法走索引）；RAG 召回已换 FULLTEXT ngram，但没有语义召回（同义词、跨语言查不到）
 - 知识库分类不支持改/删，条目为硬删除
 - AI 单轮无会话记忆；降级只返回标题，不返回正文片段
-- AI 接口无频率限制，生产必须加配额；`ai_chat_log` 没有自动清理任务，需按保留策略定期归档
+- AI 限流是固定窗口：窗口边界可能瞬时放行接近两倍配额（换来实现与排查的简单）；配额按节点共享 Redis，Redis 故障时 AI 接口会随会话一起不可用
 - 登录限流按 IP 20 次的阈值对 NAT 环境偏严，企业出口 IP 集中时要按实际调大或改成网关注入的可信头
 - 幂等键只在"同一用户 + 同一 key"下生效，key 由前端页面生成，没有做服务端过期回收（靠唯一索引长期占用存储可忽略的空间）
 - CSRF 关闭（依赖 SameSite=Lax），生产可换 Cookie 双提交模式
 - 工单号仍是"日期 + 4 位随机数 + 重试"，未换雪花/序列
-- 前端没有单元测试，靠后端 82 个用例 + 手工验收清单兜底
+- 前端没有单元测试，靠后端 96 个用例 + 手工验收清单兜底
 - Element Plus 全量引入（主包 gzip 约 410KB），内网可接受；按需引入留作优化项
 - 会话强依赖 Redis：Redis 不可用时应用启动失败（刻意不做内存降级）；Redis 侧需要开启 keyspace 事件通知才能统计 `reason=expired`
 - 每次请求多一次 Redis 往返（Lettuce 连接复用，通常亚毫秒），换来多实例部署下的会话一致性；未做会话本地缓存，避免「缓存未失效导致踢人不生效」

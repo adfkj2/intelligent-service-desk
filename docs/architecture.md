@@ -102,7 +102,7 @@ Vue Router 用 history 模式，URL 是 `/tickets/12` 这种可读路径。用�
 
 ### 构建注意
 
-`build.outDir` 指向 `../src/main/resources/static`（在 Vite root 之外），必须显式 `emptyOutDir: true`，否则旧 hash 文件残留，表现为"改完代码页面没变"甚至白屏。`web/node_modules/` 与 `src/main/resources/static/` 都在 `.gitignore` 中，新环境需先 `npm run build` 再 `mvn package`。
+`build.outDir` 指向 `../src/main/resources/static`（在 Vite root 之外），必须显式 `emptyOutDir: true`，否则旧 hash 文件残留，表现为"改完代码页面没变"甚至白屏。`web/node_modules/` 与 `src/main/resources/static/` 都在 `.gitignore` 中，新环境需先 `npm run build` 再 `./mvnw package`。
 
 ---
 
@@ -243,18 +243,18 @@ WHERE id=? AND status='OPEN' AND version=?
 ### ADR-13 数据库迁移交给 Flyway，不再手写幂等 ALTER
 
 - **背景**：早期只有一份 `schema.sql`，`CREATE TABLE IF NOT EXISTS` 能保证"表在"，但加字段得在文件末尾拼 `information_schema` 查询 + `PREPARE` 动态 DDL，靠人记得跑，也没有"这个库迁到哪一版"的记录。
-- **决策**：结构变更写成 `db/migration/V*.sql`，启动时由 Flyway 执行；老库用 `baseline-on-migrate: true` + `baseline-version: 1` 打基线跳过 V1；之后的变更一律新增 `V2__xxx.sql`。
+- **决策**：结构变更写成 `db/migration/V*.sql`，启动时由 Flyway 执行；老库用 `baseline-on-migrate: true` + `baseline-version: 1` 打基线跳过 V1；之后的变更一律新增下一个版本号（当前到 V6，下一个是 `V7__xxx.sql`）。
 - **理由**：迁移有版本号、校验和与 `flyway_schema_history` 可查；改动已执行过的脚本会因校验和不匹配被拒绝启动，从机制上防止"偷偷改历史脚本"。
 - **代价**：如果某个库停留在很早的结构（例如还没有 `phone/email`），基线会把它当成"已是最新"，需要先手工补字段再启动。
 - **配套**：`db/bootstrap.sql` 只负责建库，JDBC URL 加 `createDatabaseIfNotExist=true`，新环境零手工步骤。
 
 ### ADR-14 测试库：容器优先，本机回退
 
-- **背景**：82 个集成测试全部依赖真实 MySQL（会话外置后还依赖 Redis），要求每台机器都装好 MySQL80 并配好 `application-local.yml`，换机器或进 CI 就跑不起来。
+- **背景**：96 个自动化测试全部依赖真实 MySQL（会话外置后还依赖 Redis），要求每台机器都装好 MySQL80 并配好 `application-local.yml`，换机器或进 CI 就跑不起来。
 - **决策**：`AbstractIntegrationTest` 启动 `mysql:8.0.36` 与 `redis:7.4-alpine` 两个单例容器，用 `@DynamicPropertySource` 覆盖 `spring.datasource.*` 与 `spring.data.redis.*`；探测不到 Docker 时不注册属性，回退本机服务。`ISD_TEST_NO_DOCKER=true` 可强制回退。
 - **为什么容器放静态字段**：Spring 上下文会缓存复用，容器若随测试类停止，下一个复用同一上下文的测试类就连不上库。
 - **代价**：有 Docker 时每个测试 JVM 多 10–20 秒；没有 Docker 时探测会先等几秒再回退。
-- **CI**：GitHub Actions 两个 job 并行——后端 `mvn verify`（runner 自带 Docker，固定走容器模式），前端 `npm ci && npm run build`。
+- **CI**：GitHub Actions 三个 job 并行——后端 `./mvnw verify`（runner 自带 Docker，固定走容器模式，覆盖率门禁 + 报告上传），前端 `npm ci && npm run lint && npm run build`，以及镜像构建 `docker build`。用 wrapper 而不是裸 `mvn`，构建工具版本由仓库锁定。
 
 ### ADR-15 可观测性：按"边界 + 结果"建指标，比率只在查询侧算
 
@@ -297,7 +297,17 @@ WHERE id=? AND status='OPEN' AND version=?
 - **决策（审计）**：新增 `ai_chat_log`（V4），记录 traceId、用户、问题（截 500 字）、回答、来源、召回条数、工具调用次数、耗时、是否降级。写入走旁路，失败只 WARN——审计丢失远好过用户拿不到答案。
 - **工具调用次数怎么来的**：工具跑在 `aiExecutor` 线程上，用 `ToolCallContext` 把同一个 `AtomicInteger` 的引用绑到该线程（ThreadLocal 只传引用，计数本身线程安全），请求线程在 future 完成后读结果。
 - **踩到的坑**：InnoDB 的全文索引在行**提交后**才进入检索视图，所以 `AiRagTest` 不能加 `@Transactional`（否则种子数据永远查不到，得到"召回永远为空"的假阴性），改成 `itest-` 前缀 + `@AfterEach` 清理。
-- **代价**：审计表存了问答原文，属于内部数据，需要保留策略；`ai_chat_log` 目前没有自动清理任务。
+- **代价**：审计表存了问答原文，属于内部数据，已由每日保留任务按 90 天清理（见 ADR-19）。
+
+### ADR-19 成本与容量护栏：AI 配额 + 数据保留
+
+- **背景**：每次 AI 对话按 token 计费，接口此前没有任何配额——一个脚本就能把额度刷穿；同时 `ai_chat_log`、`outbox_event`、`notification` 三张表只增不减。
+- **决策（限流）**：`AiRateLimiter` 用 Redis 固定窗口计数，用户 20 次/分、IP 60 次/分（IP 阈值放宽：NAT 后一层楼共用一个出口）。超限返回 429 + 剩余秒数，且**在 Controller 就拦下**，被拒请求不进入检索与模型调用——挡住的是成本，不只是响应。
+- **为什么先 INCR 再比较**：这是"配额"而不是"失败计数"。先查后加在并发下会放过超额请求（多个请求同时读到 max-1），配额恰恰最不该超。被拒请求也 +1，但不续期 TTL，窗口到期自然归零。
+- **为什么用户维度命中后不再消耗 IP 配额**：否则一个人在 NAT 后面猛刷，会顺带把同事的公网 IP 配额吃光。
+- **决策（保留）**：每日 03:30 分批 `DELETE ... LIMIT 1000`，单轮最多 50 批/表；只删**已读**通知、**SENT** 事件、超期审计——未读消息、`PENDING`（待投递）、`FAILED`（排查现场）一律不删。
+- **为什么不用一个事务包住整轮**：单条 DELETE 本身原子，锁只在语句执行期间持有；一条 DELETE 删全量会形成长事务，把业务写入堵在行锁上。单表失败只 WARN，不影响其他表当天继续清理。
+- **代价**：固定窗口在边界可能瞬时放行接近两倍配额；清理是"尽力而为"，积压只能靠次日继续消化，需要盯 `isd.retention.deleted` 判断是否该调大批次。
 
 ---
 
@@ -310,7 +320,9 @@ WHERE id=? AND status='OPEN' AND version=?
 | `ticket_operation_log` | `idx_ticket(ticket_id, created_at)` | 审计查询 |
 | `kb_category` | `uk_name` | 分类名唯一 |
 | `kb_item` | `idx_category`、`idx_created_by`、`idx_title`、`ft_kb_item(FULLTEXT, ngram)` | 标题索引对 `%kw%` 无效，保留供前缀查询；全文索引供 RAG 召回 |
-| `ai_chat_log` | `idx_user_created`、`idx_trace` | AI 问答审计；`question` 截断 500 字，`answer` 存全文 |
+| `ai_chat_log` | `idx_user_created`、`idx_trace`、`idx_ai_log_created` | AI 问答审计；`question` 截断 500 字，`answer` 存全文；最后一个索引供保留任务按时间清理 |
+| `outbox_event` | `idx_status_created(status, created_at)` | 发件箱：状态机 `PENDING → SENT/FAILED`；取批与清理都命中该索引前缀 |
+| `notification` | `uk_event_user(event_id, user_id)`、`idx_user_read`、`idx_notification_read_created` | 站内信：唯一键保证同一事件对同一人只落一条；最后一个索引供清理已读旧消息 |
 | `flyway_schema_history` | 主键 `installed_rank` | Flyway 元数据：已应用版本、校验和、耗时；业务代码不读 |
 
 **不建物理外键**：单表操作与测试造数更灵活，一致性由 Service 保证。代价是脏数据风险，需靠应用层校验（如指派前校验 assignee 存在且角色为 SUPPORT）。
@@ -338,9 +350,9 @@ WHERE id=? AND status='OPEN' AND version=?
 
 | 优先级 | 事项 | 触发条件 |
 |---|---|---|
-| 高 | AI 频率限制 + 会话记忆 | 对外开放或成本敏感时 |
+| 高 | AI 会话记忆（多轮上下文） | 追问成为主要使用方式时 |
 | 高 | 语义召回（embedding + 向量库）替代 ngram | 语料上千，或同义/跨语言召回成为主要痛点 |
 | 中 | 多实例部署（会话已外置 Redis，还缺负载均衡与会话粘性验证） | 需要水平扩容 |
 | 中 | 知识条目软删除 + 版本 | 有内容合规要求 |
 | 低 | 工单号换雪花算法 | 单日工单破百 |
-| 低 | 通知（站内信 / 邮件） | 有真实用户后 |
+| 低 | 通知的其他通道（邮件 / 短信；站内信已用 Transactional Outbox 落地） | 需要触达不常登录的用户 |

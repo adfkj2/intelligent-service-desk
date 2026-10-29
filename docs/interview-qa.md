@@ -11,7 +11,7 @@
 > 第四块是 AI 助手——它只能查当前用户自己的工单和知识库，不能执行任何写操作。
 > 技术栈是 Spring Boot 3.5 + MyBatis + MySQL + Spring Security，AI 部分用 Spring AI 接 DeepSeek 做 Function Calling。
 > 重点做了两件事：**工单状态机的并发正确性**（乐观锁 + 双线程冲突测试）和 **AI 工具的权限隔离**（工具签名不带 userId，身份只从 SecurityContext 取）。
-> 一共 28 个接口、5 张业务表、68 个自动化测试（Flyway 迁移 + Testcontainers + GitHub Actions + Micrometer 指标）。
+> 一共 33 个接口、8 张业务表、96 个自动化测试（Flyway 迁移 + Testcontainers + GitHub Actions + Micrometer 指标）。
 
 ---
 
@@ -276,8 +276,12 @@ WHERE id=? AND status='OPEN' AND version=?
 展开：容器放在静态字段里只启动一次——Spring 上下文会缓存复用，容器若跟着测试类停止，下一个类就连不上库。这是我踩过的坑：一开始按类启停，第二个测试类必挂。
 
 **Q53：CI 怎么设计的？**
-一句话：两个并行 job，后端 `mvn verify`（runner 自带 Docker，固定走容器模式），前端 `npm ci && npm run build`。
-展开：`verify` 一次覆盖编译、68 个用例与打 jar；前端 job 顺带拦住"新克隆忘构建前端导致白屏"这个坑。`concurrency` 让同分支的旧流水线自动取消，省 runner 时间。
+一句话：三个并行 job——后端 `./mvnw verify`（runner 自带 Docker，固定走容器模式）、前端 `npm ci && npm run lint && npm run build`、镜像 `docker build`（不推送）。
+展开：`verify` 一次覆盖编译、96 个用例、JaCoCo 行覆盖门禁（≥90%）与打 jar，覆盖率报告与 surefire 报告都作为 CI 产物上传，失败时也传——恰恰是失败的时候最需要看哪一行没被覆盖。前端 job 先 lint 再构建：未定义变量、`v-for` 缺 `:key` 这类问题比"产物能不能生成"更早暴露。第三个 job 专门接住"只在本地能构建"的退化：依赖本机 `static/`、忘写 `.dockerignore`、少 copy 一个文件，本地能过、CI 必红。`concurrency` 让同分支的旧流水线自动取消，省 runner 时间。
+
+**Q53b：除了 CI，部署上做了什么让"换台机器也能跑"？**
+一句话：数据源与 Redis 地址全部走环境变量，`docker-compose.stack.yml` 一条命令起 app + MySQL + Redis，Flyway 启动即建表；本地开发默认值不变，所以老流程照旧。
+展开：关键是可移植性而不是"写个 Dockerfile"——基础镜像固定版本、前端在镜像内构建（`static/` 被 gitignore，不能依赖本机是否构建过）、非 root 运行、管理端口只绑 127.0.0.1 并对容器内做 `HEALTHCHECK`。依赖编排用 `depends_on: service_healthy` 而不是靠 `sleep`：MySQL 没起来就启动，Flyway 会直接失败退出，重试噪声大且不可解释。国内网络拉不到基础镜像或 Maven 依赖时，用 `--build-arg MAVEN_MIRROR_URL=...` 换源，而不是让 Dockerfile 硬编码某一家镜像站。
 
 ---
 
@@ -308,9 +312,9 @@ WHERE id=? AND status='OPEN' AND version=?
 
 ## 8. 简历描述（3 条，可直接用）
 
-- 基于 **Spring Boot 3.5 + MyBatis + MySQL** 独立开发企业 IT 服务台，覆盖工单全生命周期（创建/接单/指派/解决/关闭）与知识库，共 28 个 REST 接口、5 张表。
+- 基于 **Spring Boot 3.5 + MyBatis + MySQL** 独立开发企业 IT 服务台，覆盖工单全生命周期（创建/接单/指派/解决/关闭）、知识库与站内信，共 33 个 REST 接口、8 张表。
 - 工单状态流转用**枚举迁移白名单 + 乐观锁**保证并发正确性，编写 `CountDownLatch` 双线程冲突测试，验证同一工单并发接单**恰好一人成功**（另一人 409），并配套 4 表审计日志；用户管理同样用 `version` 条件更新 + 管理员行锁，避免两个管理员互相降权后系统失去管理员。
-- 基于 **Spring AI（DeepSeek）** 实现只读 AI 助手：工具签名不透传 userId、身份取自 SecurityContext，杜绝提示注入越权；加入 30s 硬超时与知识库降级，AI 故障不影响主业务。累计 **68 个自动化测试**全部通过。
+- 基于 **Spring AI（DeepSeek）** 实现只读 AI 助手：工具签名不透传 userId、身份取自 SecurityContext，杜绝提示注入越权；加入 30s 硬超时与知识库降级，AI 故障不影响主业务。累计 **96 个自动化测试**全部通过。
 
 ---
 
@@ -318,14 +322,14 @@ WHERE id=? AND status='OPEN' AND version=?
 
 | 项 | 数字 |
 |---|---|
-| 接口数 | 28 |
-| 数据表 | 5（sys_user / ticket / ticket_operation_log / kb_category / kb_item） |
+| 接口数 | 33（由 `ApiInventoryTest` 守护，`src/test/resources/api-endpoints.txt`） |
+| 数据表 | 8（sys_user / ticket / ticket_operation_log / kb_category / kb_item / ai_chat_log / outbox_event / notification） |
 | 工单状态 | 4（OPEN / IN_PROGRESS / RESOLVED / CLOSED） |
 | 状态迁移 | 4（claim / assign / resolve / close） |
 | 角色 | 3（EMPLOYEE / SUPPORT / ADMIN） |
 | AI 工具 | 2（查工单 / 查知识库） |
 | AI 超时 | 30 秒（可配） |
-| 测试用例 | 68 |
+| 测试用例 | 96 |
 | 前端页面 | 8（登录 / 修改密码 / 工作台 / 工单列表 / 详情 / 新建 / 知识库 / 用户管理）+ AI 抽屉 |
 | 前端主包 | gzip 约 410KB（Element Plus 全量引入） |
 | 端口 | 8081（开发期前端 5173 代理到 8081） |
