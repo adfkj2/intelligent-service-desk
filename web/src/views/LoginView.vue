@@ -170,7 +170,7 @@ function fillDemo() {
         <div class="mt-8 rounded-lg border border-line bg-white p-3.5">
           <p class="m-0 text-[12px] font-medium text-ink-900">演示账号</p>
           <p class="m-0 mt-1 text-[11px] leading-5 text-ink-600">
-            员工 demo_emp / employee123　技术支持 demo_sup / support123　管理员 demo_admin / admin12345
+            员工 demo_emp / employee123 · 技术支持 demo_sup / support123 · 管理员 demo_admin / admin12345
           </p>
         </div>
       </div>
