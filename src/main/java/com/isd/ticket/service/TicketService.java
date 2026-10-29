@@ -17,6 +17,7 @@ import com.isd.common.exception.BusinessException;
 import com.isd.common.exception.ErrorCode;
 import com.isd.common.metrics.IsdMetrics;
 import com.isd.common.result.PageResponse;
+import com.isd.notification.service.NotificationPublisher;
 import com.isd.ticket.domain.TicketAction;
 import com.isd.ticket.domain.TicketStatus;
 import com.isd.ticket.dto.CreateTicketRequest;
@@ -48,15 +49,18 @@ public class TicketService {
     private final TicketMapper ticketMapper;
     private final TicketOperationLogMapper operationLogMapper;
     private final UserMapper userMapper;
+    private final NotificationPublisher notificationPublisher;
     private final IsdMetrics metrics;
 
     public TicketService(TicketMapper ticketMapper,
                          TicketOperationLogMapper operationLogMapper,
                          UserMapper userMapper,
+                         NotificationPublisher notificationPublisher,
                          IsdMetrics metrics) {
         this.ticketMapper = ticketMapper;
         this.operationLogMapper = operationLogMapper;
         this.userMapper = userMapper;
+        this.notificationPublisher = notificationPublisher;
         this.metrics = metrics;
     }
 
@@ -173,7 +177,10 @@ public class TicketService {
 
         writeLog(id, operator.getId(), TicketAction.CLAIM.name(), current.name(),
                 TicketAction.CLAIM.to().name(), "接单");
-        return TicketResponse.from(reload(id));
+        Ticket latest = reload(id);
+        // 与状态变更同事务写 outbox；真正的投递交给调度器，通知失败不会影响接单结果
+        notificationPublisher.publishTicketStatusChanged(latest, current.name(), operator);
+        return TicketResponse.from(latest);
     }
 
     /**
@@ -208,7 +215,9 @@ public class TicketService {
 
         writeLog(id, operator.getId(), TicketAction.ASSIGN.name(), current.name(),
                 TicketAction.ASSIGN.to().name(), "指派给用户 " + assigneeId);
-        return TicketResponse.from(reload(id));
+        Ticket latest = reload(id);
+        notificationPublisher.publishTicketAssigned(latest, operator);
+        return TicketResponse.from(latest);
     }
 
     /**
@@ -241,7 +250,9 @@ public class TicketService {
         }
 
         writeLog(id, operator.getId(), action.name(), current.name(), action.to().name(), comment);
-        return TicketResponse.from(reload(id));
+        Ticket latest = reload(id);
+        notificationPublisher.publishTicketStatusChanged(latest, current.name(), operator);
+        return TicketResponse.from(latest);
     }
 
     @Transactional(readOnly = true)

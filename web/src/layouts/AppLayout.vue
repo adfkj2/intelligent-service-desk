@@ -5,6 +5,7 @@ import { BookOpen, ClipboardList, LayoutDashboard, LogOut, Sparkles, User, Users
 import { useUserStore } from '../stores/user'
 import { ROLE_LABEL, ROLE_TAG_TYPE } from '../constants/ticket'
 import AiDrawer from '../components/AiDrawer.vue'
+import NotificationBell from '../components/NotificationBell.vue'
 import ProfileDialog from '../components/ProfileDialog.vue'
 
 const route = useRoute()
@@ -111,6 +112,7 @@ function handleCommand(command) {
         </div>
 
         <div class="flex items-center gap-3">
+          <NotificationBell />
           <el-tag :type="ROLE_TAG_TYPE[store.role] || 'info'" size="small" effect="plain">
             {{ ROLE_LABEL[store.role] || store.role }}
           </el-tag>
