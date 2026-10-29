@@ -11,7 +11,9 @@ import java.util.List;
  *
  * @param answer         回答正文
  * @param source         LLM / FALLBACK
- * @param relatedTitles  降级时命中的知识条目标题（正常回答时为空）
+ * @param relatedTitles  RAG 召回命中的知识条目标题。
+ *                       正常回答时也会带上（用户想深挖可以直接去知识库），
+ *                       降级时它就是答案本身的数据来源。
  */
 public record ChatAnswerResponse(String answer, String source, List<String> relatedTitles) {
 }

@@ -35,6 +35,7 @@ public class KnowledgeTools {
             @ToolParam(description = "检索关键词，例如：打印机、VPN、密码重置、邮箱") String keyword) {
 
         long startNanos = System.nanoTime();
+        ToolCallContext.increment();
         if (keyword == null || keyword.isBlank()) {
             metrics.recordToolCall(TOOL_NAME, IsdMetrics.TOOL_EMPTY, startNanos);
             return List.of();

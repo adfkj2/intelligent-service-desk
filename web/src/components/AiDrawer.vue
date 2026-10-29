@@ -107,6 +107,7 @@ async function send(text) {
                 请求失败
               </el-tag>
               <el-tag v-else size="small" type="success" effect="plain">模型回答</el-tag>
+              <span v-if="message.titles?.length" class="text-xs text-ink-400">参考知识：</span>
               <span
                 v-for="title in message.titles || []"
                 :key="title"

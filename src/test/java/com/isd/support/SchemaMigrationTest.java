@@ -21,23 +21,45 @@ class SchemaMigrationTest extends AbstractIntegrationTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    @DisplayName("Flyway 已应用 V1：5 张业务表与 sys_user 关键字段齐全")
+    @DisplayName("Flyway 已应用全部迁移：业务表、幂等键、全文索引、AI 审计表都在")
     void schemaIsMigrated() {
         Integer applied = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '1' AND success = 1",
+                "SELECT COUNT(*) FROM flyway_schema_history WHERE version IN ('1','2','3','4') AND success = 1",
                 Integer.class);
-        assertThat(applied).isEqualTo(1);
+        assertThat(applied).isEqualTo(4);
 
         List<String> tables = jdbcTemplate.queryForList(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()",
                 String.class);
         assertThat(tables).contains(
-                "sys_user", "ticket", "ticket_operation_log", "kb_category", "kb_item", "flyway_schema_history");
+                "sys_user", "ticket", "ticket_operation_log", "kb_category", "kb_item",
+                "ai_chat_log", "flyway_schema_history");
 
         List<String> userColumns = jdbcTemplate.queryForList(
                 "SELECT column_name FROM information_schema.columns "
                         + "WHERE table_schema = DATABASE() AND table_name = 'sys_user'",
                 String.class);
         assertThat(userColumns).contains("phone", "email", "must_change_password", "version");
+
+        // V2：幂等键列与唯一索引（踢掉它，重复提交就会双写）
+        List<String> ticketColumns = jdbcTemplate.queryForList(
+                "SELECT column_name FROM information_schema.columns "
+                        + "WHERE table_schema = DATABASE() AND table_name = 'ticket'",
+                String.class);
+        assertThat(ticketColumns).contains("idempotency_key");
+        Integer idempotencyIndex = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.statistics "
+                        + "WHERE table_schema = DATABASE() AND table_name = 'ticket' "
+                        + "AND index_name = 'uk_creator_idempotency' AND non_unique = 0",
+                Integer.class);
+        assertThat(idempotencyIndex).isGreaterThan(0);
+
+        // V3：全文索引（用 ngram 解析器，否则中文查询恒为空）
+        Integer fulltextIndex = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.statistics "
+                        + "WHERE table_schema = DATABASE() AND table_name = 'kb_item' "
+                        + "AND index_name = 'ft_kb_item' AND index_type = 'FULLTEXT'",
+                Integer.class);
+        assertThat(fulltextIndex).isGreaterThan(0);
     }
 }

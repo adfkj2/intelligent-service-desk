@@ -112,6 +112,30 @@ public class KbService {
         return query(null, likePattern(keyword), page, size);
     }
 
+    /**
+     * RAG 召回：把用户问题当自然语言查询，返回最相关的知识条目（含正文）。
+     *
+     * 只读、不过权限：知识库本身对所有登录用户可见（列表与检索接口都是这样），
+     * 所以这里不额外加角色判断，避免"AI 能查到、页面查不到"的不一致。
+     *
+     * 两级召回：
+     * 1. FULLTEXT ngram（V3 索引），按相关性排序；
+     * 2. 全文查不到时退回 LIKE——单字查询（如"邮"）或纯符号在 ngram 下是空结果，
+     *    而这类输入恰恰是用户最常见的随手输入。
+     */
+    @Transactional(readOnly = true)
+    public List<KbItem> retrieve(String question, int limit) {
+        if (isBlank(question) || limit <= 0) {
+            return List.of();
+        }
+        String query = question.trim();
+        List<KbItem> hits = itemMapper.searchFulltext(query, limit);
+        if (hits.isEmpty()) {
+            hits = itemMapper.searchLikeWithContent(likePattern(query), limit);
+        }
+        return hits;
+    }
+
     @Transactional
     public KbItemResponse updateItem(Long id, UpdateItemRequest request, LoginUser operator) {
         requireWriteRole(operator);

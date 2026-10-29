@@ -48,6 +48,8 @@ public class TicketTools {
             @ToolParam(description = "返回条数上限，默认 5，最大 20", required = false) Integer limit) {
 
         long startNanos = System.nanoTime();
+        // 审计用：这次对话模型调了几次工具（失败也算，那是模型真的发起过）
+        ToolCallContext.increment();
         try {
             LoginUser operator = currentUserProvider.require();
             int size = limit == null ? DEFAULT_LIMIT : Math.min(Math.max(limit, 1), MAX_LIMIT);
