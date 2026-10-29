@@ -398,6 +398,8 @@ web/                   前端工程（独立 npm 包，构建产物回灌 src/ma
 
 覆盖率门禁：JaCoCo **行覆盖 ≥ 90%**（实测基线 91.90%，分支 71.76%），不达标 `./mvnw verify` 直接失败，报告随 CI 产物可下载。
 
+另有性能验证：k6 脚本压工单读路径与 AI 配额，阈值写死在脚本里（列表 p95 < 300ms、详情 p95 < 200ms、AI 5xx == 0），跑不过即失败。实测数据与瓶颈分析见 [docs/perf-report.md](docs/perf-report.md)。
+
 | 测试类 | 用例数 | 覆盖内容 |
 |---|---|---|
 | `TicketApiTest` | 12 | 创建/详情/分页/统计、参数校验、401/404/405/415 |
@@ -466,3 +468,5 @@ CI 在 `.github/workflows/ci.yml`，三个 job 都是硬门禁：
 - [docs/interview-qa.md](docs/interview-qa.md) 面试问答速查 + 简历描述
 - [docs/learning-notes.md](docs/learning-notes.md) 学习笔记（踩坑记录）
 - [docs/phase0-架构与MVP.md](docs/phase0-架构与MVP.md) Phase 0 需求与规划
+- [docs/perf-report.md](docs/perf-report.md) 压测报告（k6：吞吐、p95、限流验证、瓶颈分析）
+- [perf/README.md](perf/README.md) 压测脚本用法与数据清理
