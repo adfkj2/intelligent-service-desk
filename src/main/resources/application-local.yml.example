@@ -3,6 +3,13 @@
 spring:
   datasource:
     password: "你的 MySQL root 密码"
+  # 会话存 Redis：先执行 docker compose up -d（仓库根目录），默认就是 127.0.0.1:6379 且无密码，
+  # 所以本机通常不用在这里写任何东西；只有 Redis 不在默认地址时才需要覆盖：
+  # data:
+  #   redis:
+  #     host: 127.0.0.1
+  #     port: 6379
+  #     password: ""
   ai:
     openai:
       api-key: "sk-你的 DeepSeek Key"

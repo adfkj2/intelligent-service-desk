@@ -1,0 +1,22 @@
+# 本地开发用的依赖服务。启动：docker compose up -d
+# 只放了 Redis：MySQL 用本机已装好的服务（MySQL80，端口 3306）。
+services:
+  redis:
+    image: redis:7.4-alpine
+    container_name: isd-redis
+    ports:
+      - "6379:6379"
+    # notify-keyspace-events Egx：Spring Session 依赖 key 过期事件来发布 SessionExpiredEvent，
+    # 会话过期（30 分钟无操作）后 isd_sessions_ended_total{reason=expired} 才有数。
+    # Spring Session 启动时也会自己 CONFIG SET 一次；写在这里是防止 Redis 被限制 CONFIG 命令时静默失败。
+    command: ["redis-server", "--appendonly", "yes", "--notify-keyspace-events", "Egx"]
+    volumes:
+      - isd-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  isd-redis-data:

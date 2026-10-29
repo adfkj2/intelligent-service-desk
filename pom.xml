@@ -62,6 +62,21 @@
             <artifactId>spring-boot-starter-security</artifactId>
         </dependency>
 
+        <!--
+            会话外置：Session 存 Redis 而不是 Tomcat 进程内存。
+            只有把会话放到共享存储，"管理员重置密码后踢人"才在多实例部署下成立——
+            内存 SessionRegistry 只能踢到本机上的会话。
+            版本由 Boot 的 BOM（spring-session-bom）管理，不手写版本号。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.session</groupId>
+            <artifactId>spring-session-data-redis</artifactId>
+        </dependency>
+
         <!-- P4：OpenAPI 3 文档，Swagger UI 位于 /swagger-ui.html -->
         <!-- Boot 的 BOM 不管理 springdoc，必须显式声明版本；2.8.x 对应 Boot 3.4/3.5 -->
         <dependency>

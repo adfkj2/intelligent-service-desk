@@ -133,8 +133,9 @@ public class UserService {
         if (updated == 0) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "用户不存在: id=" + targetId);
         }
-        // 旧会话必须立刻失效，否则对方仍可用旧会话继续操作，绕过强制改密
-        sessionRevoker.revokeAll(targetId);
+        // 旧会话必须立刻失效，否则对方仍可用旧会话继续操作，绕过强制改密。
+        // 按 username 查：Spring Session 的 principal 索引是登录名，不是 userId
+        sessionRevoker.revokeAll(target.getUsername());
 
         log.info("密码重置: targetId={} username={} operatorId={}", targetId, target.getUsername(), operatorId);
         return new ResetPasswordResponse(targetId, target.getUsername(), temporaryPassword, true);
@@ -156,7 +157,7 @@ public class UserService {
         }
 
         userMapper.updatePassword(userId, passwordEncoder.encode(request.newPassword()), 0);
-        sessionRevoker.revokeOthers(userId, currentSessionId);
+        sessionRevoker.revokeOthers(user.getUsername(), currentSessionId);
         log.info("密码修改: userId={}", userId);
         return UserResponse.from(requireUser(userId));
     }

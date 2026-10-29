@@ -4,7 +4,7 @@ import org.springframework.http.HttpStatus;
 
 /**
  * 业务错误码。
- * 约定：4xx 段与 HTTP 语义对齐（400/404/409），5xx 段表示系统级错误。
+ * 约定：4xx 段与 HTTP 语义对齐（400/404/409/429），5xx 段表示系统级错误。
  * 取舍：HTTP 状态放在枚举里，小项目一处可查；大项目通常把 HTTP 映射下沉到 web 适配层，
  * 让领域层只依赖业务码。
  */
@@ -15,6 +15,7 @@ public enum ErrorCode {
     FORBIDDEN(40300, HttpStatus.FORBIDDEN, "无权访问该资源"),
     NOT_FOUND(40400, HttpStatus.NOT_FOUND, "资源不存在"),
     CONFLICT(40900, HttpStatus.CONFLICT, "业务冲突"),
+    TOO_MANY_REQUESTS(42900, HttpStatus.TOO_MANY_REQUESTS, "请求过于频繁，请稍后再试"),
     INTERNAL_ERROR(50000, HttpStatus.INTERNAL_SERVER_ERROR, "服务器内部错误");
 
     private final int code;

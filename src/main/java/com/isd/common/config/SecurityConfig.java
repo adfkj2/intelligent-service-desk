@@ -7,7 +7,6 @@ import com.isd.common.exception.ErrorCode;
 import com.isd.common.metrics.IsdMetrics;
 import com.isd.common.result.ApiResponse;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.boot.web.servlet.ServletListenerRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -17,14 +16,11 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.session.SessionRegistry;
-import org.springframework.security.core.session.SessionRegistryImpl;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
-import org.springframework.security.web.session.HttpSessionEventPublisher;
 
 /**
  * Spring Security 配置（Session 方案）。
@@ -49,21 +45,6 @@ public class SecurityConfig {
         return new HttpSessionSecurityContextRepository();
     }
 
-    /**
-     * 会话注册表：用于“重置密码后踢人”。
-     * 手工登录必须在 AuthController 里显式 registerNewSession，否则这里查不到会话。
-     */
-    @Bean
-    public SessionRegistry sessionRegistry() {
-        return new SessionRegistryImpl();
-    }
-
-    /** 会话创建/销毁事件同步到 SessionRegistry；不注册的话 registry 会残留死会话 */
-    @Bean
-    public ServletListenerRegistrationBean<HttpSessionEventPublisher> httpSessionEventPublisher() {
-        return new ServletListenerRegistrationBean<>(new HttpSessionEventPublisher());
-    }
-
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration configuration) throws Exception {
         return configuration.getAuthenticationManager();
@@ -73,7 +54,6 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
                                                    SecurityContextRepository securityContextRepository,
                                                    ObjectMapper objectMapper,
-                                                   SessionRegistry sessionRegistry,
                                                    IsdMetrics metrics) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -81,16 +61,13 @@ public class SecurityConfig {
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .logout(AbstractHttpConfigurer::disable)
                 .securityContext(context -> context.securityContextRepository(securityContextRepository))
+                /*
+                 * 会话存在 Redis（Spring Session），"踢人"= 删除会话记录，而不是给 SessionInformation 打过期标记。
+                 * 因此这里不再装配 ConcurrentSessionFilter / SessionRegistry：
+                 * 被删掉的会话下次请求就是未登录，由下面的 authenticationEntryPoint 统一返回 401 JSON。
+                 */
                 .sessionManagement(session -> session
-                        .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
-                        /*
-                         * -1 表示不限并发数，但要开启并发控制才会装配 ConcurrentSessionFilter 来检查 expireNow 标记；
-                         * 过期后返回 401 JSON，而不是 Spring 默认的 "/?expired" 302 跳转。
-                         */
-                        .maximumSessions(-1)
-                        .sessionRegistry(sessionRegistry)
-                        .expiredSessionStrategy(event -> writeJson(event.getResponse(),
-                                ErrorCode.UNAUTHORIZED, objectMapper, "会话已失效，请重新登录")))
+                        .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login").permitAll()
                         // 登录页“忘记密码”需要未登录也能读取管理员联系方式

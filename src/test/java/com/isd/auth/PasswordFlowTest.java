@@ -1,11 +1,12 @@
 package com.isd.auth;
 
 import com.jayway.jsonpath.JsonPath;
-import com.isd.auth.domain.UserRole;
 import com.isd.auth.entity.User;
 import com.isd.auth.mapper.UserMapper;
 import com.isd.support.AbstractIntegrationTest;
+import com.isd.support.TestSessions;
 import com.isd.support.TestUsers;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,7 +14,6 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,7 +50,7 @@ class PasswordFlowTest extends AbstractIntegrationTest {
     void resetPasswordForcesChange() throws Exception {
         register("flow_victim", "password123");
         User victim = userMapper.findByUsername("flow_victim").orElseThrow();
-        MockHttpSession oldSession = login("flow_victim", "password123");
+        Cookie oldCookie = TestSessions.login(mockMvc, "flow_victim", "password123");
 
         MvcResult reset = mockMvc.perform(post("/api/admin/users/{id}/password/reset", victim.getId())
                         .with(user(TestUsers.admin(7001L))))
@@ -71,8 +71,8 @@ class PasswordFlowTest extends AbstractIntegrationTest {
                         .content(loginBody("flow_victim", "password123")))
                 .andExpect(status().isUnauthorized());
 
-        // 重置前的旧会话被 SessionRegistry 标记过期，下一次请求 401
-        mockMvc.perform(get("/api/auth/me").session(oldSession))
+        // 重置前的旧会话已从 Redis 删除，带着旧 Cookie 请求直接 401
+        mockMvc.perform(get("/api/auth/me").cookie(oldCookie))
                 .andExpect(status().isUnauthorized());
 
         // 临时密码可以登录，但被标记为必须改密
@@ -82,24 +82,26 @@ class PasswordFlowTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.mustChangePassword").value(true))
                 .andReturn();
-        MockHttpSession tempSession = (MockHttpSession) tempLogin.getRequest().getSession(false);
+        Cookie tempCookie = TestSessions.cookieOf(tempLogin);
 
         // 服务端拦截：未改密时业务接口 403
-        mockMvc.perform(get("/api/tickets").session(tempSession))
+        mockMvc.perform(get("/api/tickets").cookie(tempCookie))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.message").value("请先修改初始密码"));
 
-        // 改密成功
-        mockMvc.perform(post("/api/auth/change-password").session(tempSession)
+        // 改密成功；session id 会轮换，用响应里下发的新 Cookie 继续
+        MvcResult changed = mockMvc.perform(post("/api/auth/change-password").cookie(tempCookie)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"oldPassword":"%s","newPassword":"newPassword123"}
                                 """.formatted(temporaryPassword)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.mustChangePassword").value(false));
+                .andExpect(jsonPath("$.data.mustChangePassword").value(false))
+                .andReturn();
+        Cookie renewedCookie = TestSessions.cookieOf(changed);
 
         // 同一个会话改密后立刻可以访问业务接口
-        mockMvc.perform(get("/api/tickets").session(tempSession))
+        mockMvc.perform(get("/api/tickets").cookie(renewedCookie))
                 .andExpect(status().isOk());
 
         // 新密码可登录，临时密码失效
@@ -116,6 +118,39 @@ class PasswordFlowTest extends AbstractIntegrationTest {
     }
 
     @Test
+    @DisplayName("强制改密态下可退出登录、读取管理员联系方式；业务接口继续 403")
+    void forcedChangePasswordKeepsEscapeHatches() throws Exception {
+        register("flow_escape", "password123");
+        User victim = userMapper.findByUsername("flow_escape").orElseThrow();
+
+        MvcResult reset = mockMvc.perform(post("/api/admin/users/{id}/password/reset", victim.getId())
+                        .with(user(TestUsers.admin(7001L))))
+                .andExpect(status().isOk())
+                .andReturn();
+        String temporaryPassword = JsonPath.read(reset.getResponse().getContentAsString(),
+                "$.data.temporaryPassword");
+
+        Cookie tempCookie = TestSessions.login(mockMvc, "flow_escape", temporaryPassword);
+
+        // 改密页的“联系管理员”入口依赖它：强制改密态下必须放行
+        mockMvc.perform(get("/api/auth/admin-contacts").cookie(tempCookie))
+                .andExpect(status().isOk());
+
+        // 安全语义不变：没改密之前业务接口仍然被拦住
+        mockMvc.perform(get("/api/tickets").cookie(tempCookie))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("请先修改初始密码"));
+
+        // 改密页的“退出登录”入口依赖它：否则忘记临时密码的用户会被彻底锁死
+        mockMvc.perform(post("/api/auth/logout").cookie(tempCookie))
+                .andExpect(status().isOk());
+
+        // 注销会删除 Redis 里的会话，旧 Cookie 再请求就是未登录
+        mockMvc.perform(get("/api/auth/me").cookie(tempCookie))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     @DisplayName("管理员不能重置自己的密码：409")
     void adminCannotResetOwnPassword() throws Exception {
         mockMvc.perform(post("/api/admin/users/{id}/password/reset", 7001L)
@@ -128,9 +163,9 @@ class PasswordFlowTest extends AbstractIntegrationTest {
     @DisplayName("改密时原密码错误：400，且不踢回登录页")
     void wrongOldPassword() throws Exception {
         register("flow_wrong", "password123");
-        MockHttpSession session = login("flow_wrong", "password123");
+        Cookie session = TestSessions.login(mockMvc, "flow_wrong", "password123");
 
-        mockMvc.perform(post("/api/auth/change-password").session(session)
+        mockMvc.perform(post("/api/auth/change-password").cookie(session)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"oldPassword":"not-my-password","newPassword":"newPassword123"}
@@ -150,9 +185,9 @@ class PasswordFlowTest extends AbstractIntegrationTest {
         register("contact_admin", "password123");
         User enabled = userMapper.findByUsername("contact_admin").orElseThrow();
         userMapper.updateRole(enabled.getId(), "ADMIN", enabled.getVersion());
-        MockHttpSession session = login("contact_admin", "password123");
+        Cookie session = TestSessions.login(mockMvc, "contact_admin", "password123");
 
-        mockMvc.perform(put("/api/auth/me/contact").session(session)
+        mockMvc.perform(put("/api/auth/me/contact").cookie(session)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"phone":"13800001111","email":"helpdesk@example.com"}
@@ -186,9 +221,9 @@ class PasswordFlowTest extends AbstractIntegrationTest {
         User admin = userMapper.findByUsername("contact_empty").orElseThrow();
         // 用 Mapper 提权（而不是 JdbcTemplate），确保 MyBatis 一级缓存被清掉，Service 能读到 ADMIN
         userMapper.updateRole(admin.getId(), "ADMIN", admin.getVersion());
-        MockHttpSession session = login("contact_empty", "password123");
+        Cookie session = TestSessions.login(mockMvc, "contact_empty", "password123");
 
-        mockMvc.perform(put("/api/auth/me/contact").session(session)
+        mockMvc.perform(put("/api/auth/me/contact").cookie(session)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"phone":"","email":""}
@@ -206,14 +241,5 @@ class PasswordFlowTest extends AbstractIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(loginBody(username, password)))
                 .andExpect(status().isCreated());
-    }
-
-    private MockHttpSession login(String username, String password) throws Exception {
-        MvcResult result = mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(loginBody(username, password)))
-                .andExpect(status().isOk())
-                .andReturn();
-        return (MockHttpSession) result.getRequest().getSession(false);
     }
 }

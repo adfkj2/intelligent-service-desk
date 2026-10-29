@@ -18,6 +18,31 @@ spring:
     username: root
     password: ${DB_PASSWORD:}
 
+  data:
+    redis:
+      # 会话存储：docker compose up -d 起本地 Redis，详见仓库根目录 docker-compose.yml
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      # Redis 抖动时快速失败，避免请求线程被无限挂住（会话读取在每个请求的过滤器里）
+      timeout: 2s
+      connect-timeout: 2s
+
+  session:
+    # 会话空闲超时：Spring Session 自己的口径，与 server.servlet.session.timeout 保持一致；
+    # 后者仍需保留，因为 Cookie 的 http-only / same-site 由 server.servlet.session.cookie.* 下发
+    timeout: 30m
+    redis:
+      namespace: isd:session
+      # indexed 不是可选项而是刚需：只有索引版仓库会维护 "principal -> sessionId" 的 Set，
+      # "重置密码后踢人"正是靠这个索引找会话。Boot 3.5 默认是 default（非索引），
+      # 那样 findByPrincipalName 不可用，只能全库 SCAN。
+      repository-type: indexed
+      # on_save：一次请求内多次改属性只在响应写出时落一次 Redis，减少写放大
+      flush-mode: on_save
+      save-mode: on_set_attribute
+
   flyway:
     # 表结构只由 db/migration/V*.sql 管理；不再维护手写的幂等 ALTER 段
     locations: classpath:db/migration
@@ -48,6 +73,13 @@ isd:
   ai:
     # 单次对话的硬超时（秒）：超过就走知识库降级，不能让用户干等
     timeout-seconds: 30
+  auth:
+    login:
+      # 同账号连续失败 5 次锁 15 分钟（主要防线：攻击者换 IP 也挡得住）
+      max-failures-per-user: 5
+      # 同 IP 失败 20 次才锁：阈值故意放宽，办公室 NAT 后大家共用一个出口 IP
+      max-failures-per-ip: 20
+      lock-minutes: 15
 
 mybatis:
   configuration:

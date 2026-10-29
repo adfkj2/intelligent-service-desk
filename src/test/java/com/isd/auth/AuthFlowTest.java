@@ -4,7 +4,9 @@ import com.isd.auth.domain.UserRole;
 import com.isd.auth.entity.User;
 import com.isd.auth.mapper.UserMapper;
 import com.isd.support.AbstractIntegrationTest;
+import com.isd.support.TestSessions;
 import com.isd.support.TestUsers;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,7 +14,6 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
@@ -66,18 +67,18 @@ class AuthFlowTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.data.role").value("EMPLOYEE"))
                 .andReturn();
 
-        MockHttpSession session = (MockHttpSession) login.getRequest().getSession(false);
-        assertThat(session).isNotNull();
+        Cookie session = TestSessions.cookieOf(login);
 
-        mockMvc.perform(get("/api/auth/me").session(session))
+        mockMvc.perform(get("/api/auth/me").cookie(session))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.username").value("alice"));
 
-        mockMvc.perform(post("/api/auth/logout").session(session))
+        mockMvc.perform(post("/api/auth/logout").cookie(session))
                 .andExpect(status().isOk());
 
-        // SecurityContextLogoutHandler 会 invalidate session，所以这里断言 session 已失效
-        assertThat(session.isInvalid()).isTrue();
+        // 注销会从 Redis 删除会话，旧 Cookie 再请求就是未登录
+        mockMvc.perform(get("/api/auth/me").cookie(session))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

@@ -9,6 +9,7 @@ import com.isd.auth.dto.RegisterRequest;
 import com.isd.auth.dto.UpdateContactRequest;
 import com.isd.auth.dto.UserResponse;
 import com.isd.auth.security.CurrentUserProvider;
+import com.isd.auth.security.LoginAttemptGuard;
 import com.isd.auth.security.LoginUser;
 import com.isd.auth.service.UserService;
 import com.isd.common.exception.BusinessException;
@@ -28,7 +29,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.web.authentication.logout.SecurityContextLogoutHandler;
 import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -53,21 +53,32 @@ public class AuthController {
     private final SecurityContextRepository securityContextRepository;
     private final UserService userService;
     private final CurrentUserProvider currentUserProvider;
-    private final SessionRegistry sessionRegistry;
+    private final LoginAttemptGuard loginAttemptGuard;
     private final IsdMetrics metrics;
 
     public AuthController(AuthenticationManager authenticationManager,
                           SecurityContextRepository securityContextRepository,
                           UserService userService,
                           CurrentUserProvider currentUserProvider,
-                          SessionRegistry sessionRegistry,
+                          LoginAttemptGuard loginAttemptGuard,
                           IsdMetrics metrics) {
         this.authenticationManager = authenticationManager;
         this.securityContextRepository = securityContextRepository;
         this.userService = userService;
         this.currentUserProvider = currentUserProvider;
-        this.sessionRegistry = sessionRegistry;
+        this.loginAttemptGuard = loginAttemptGuard;
         this.metrics = metrics;
+    }
+
+    /**
+     * 取来源 IP 用于限流。
+     *
+     * 只用 remoteAddr，不读 X-Forwarded-For：这个头客户端可以随便伪造，
+     * 在没有可信反向代理的前提下读它等于把限流关掉。真上了网关再改成
+     * ForwardedHeaderFilter 或网关注入的可信头。
+     */
+    private String clientIp(HttpServletRequest request) {
+        return request.getRemoteAddr();
     }
 
     @PostMapping("/register")
@@ -84,18 +95,30 @@ public class AuthController {
     public ApiResponse<UserResponse> login(@Valid @RequestBody LoginRequest request,
                                            HttpServletRequest httpRequest,
                                            HttpServletResponse httpResponse) {
+        String clientIp = clientIp(httpRequest);
+        long lockedSeconds = loginAttemptGuard.lockedSeconds(request.username(), clientIp);
+        if (lockedSeconds > 0) {
+            // 先判锁再验证凭据：锁定期间连"密码对不对"都不告诉对方，避免变成密码探测接口
+            metrics.recordLogin("locked");
+            throw new BusinessException(ErrorCode.TOO_MANY_REQUESTS,
+                    "登录失败次数过多，请 " + Math.max(1, (lockedSeconds + 59) / 60) + " 分钟后再试");
+        }
+
         Authentication authentication;
         try {
             authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(request.username(), request.password()));
         } catch (DisabledException ex) {
+            // 密码是对的、只是账号被禁用：不计入失败次数，否则管理员禁用后对方会把自己锁住
             metrics.recordLogin("disabled");
             throw new BusinessException(ErrorCode.FORBIDDEN, "账号已被禁用，请联系管理员");
         } catch (AuthenticationException ex) {
+            loginAttemptGuard.recordFailure(request.username(), clientIp);
             // 指标里区分失败类型（内部可见），但响应保持统一文案，不对调用方泄漏账号是否存在
             metrics.recordLogin("bad_credentials");
             throw new BusinessException(ErrorCode.UNAUTHORIZED, "用户名或密码错误");
         }
+        loginAttemptGuard.recordSuccess(request.username());
 
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(authentication);
@@ -108,10 +131,10 @@ public class AuthController {
         }
 
         /*
-         * 手工登录不经过 SessionManagementFilter，必须自己把会话登记到 SessionRegistry。
-         * 否则“重置密码后踢人”找不到目标会话，SessionRevoker 会是空转。
+         * 会话存在 Redis（Spring Session）：saveContext 写入 SPRING_SECURITY_CONTEXT 属性时，
+         * Spring Session 会顺带维护 principal 索引，"重置密码后踢人"正是按这个索引查会话。
+         * 不再需要手工登记 SessionRegistry —— 那是进程内实现才需要的东西。
          */
-        sessionRegistry.registerNewSession(httpRequest.getSession().getId(), authentication.getPrincipal());
         metrics.recordLogin("success");
 
         // 从数据库回读，保证 phone/email/mustChangePassword 都是最新值（Session 里的 principal 可能是旧的）
@@ -139,7 +162,7 @@ public class AuthController {
      *
      * 改密成功后必须重建 Session 里的 LoginUser：它记录着 mustChangePassword，
      * 只更新数据库而不更新 principal，拦截器会继续把后续请求全部挡成 403。
-     * 顺带轮换 session id 并同步 SessionRegistry，避免旧会话 id 残留。
+     * 顺带轮换 session id：Spring Session 在提交时迁移会话，旧 id 的键不会残留。
      */
     @PostMapping("/change-password")
     public ApiResponse<UserResponse> changePassword(@Valid @RequestBody ChangePasswordRequest request,
@@ -159,10 +182,8 @@ public class AuthController {
         SecurityContextHolder.setContext(context);
         securityContextRepository.saveContext(context, httpRequest, httpResponse);
 
+        // 改密后轮换 session id：旧 id 在 Redis 里被迁走，SessionRevoker 已经按旧 id 跳过本会话
         httpRequest.changeSessionId();
-        String newSessionId = httpRequest.getSession().getId();
-        sessionRegistry.removeSessionInformation(oldSessionId);
-        sessionRegistry.registerNewSession(newSessionId, refreshed);
 
         return ApiResponse.ok(updated);
     }
