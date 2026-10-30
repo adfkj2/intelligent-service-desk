@@ -11,16 +11,18 @@
    docker compose -f docker-compose.stack.yml up -d
    ```
 
-2. 准备压测账号（注册接口固定给 EMPLOYEE，够读自己的工单；造数据也用同一个账号）：
+2. 准备压测账号（注册接口固定给 EMPLOYEE，够读自己的工单；造数据也用同一个账号）。
+   写请求有 CSRF 双提交，所以先 GET 拿 `XSRF-TOKEN` Cookie，再把它放进请求头：
 
-   ```powershell
-   $body = @{ username = 'perf_emp'; password = 'perf12345'; fullName = '压测账号' } | ConvertTo-Json
-   Invoke-RestMethod -Method Post -Uri http://localhost:8081/api/auth/register `
-       -ContentType 'application/json; charset=utf-8' `
-       -Body ([Text.Encoding]::UTF8.GetBytes($body))
+   ```bash
+   curl -s -c cookies.txt http://localhost:8081/api/ping
+   XSRF=$(awk '$6 == "XSRF-TOKEN" { print $7 }' cookies.txt)
+   curl -s -b cookies.txt -H "Content-Type: application/json" -H "X-XSRF-TOKEN: $XSRF" \
+     -d '{"username":"perf_emp","password":"perf12345","fullName":"压测账号"}' \
+     http://localhost:8081/api/auth/register
    ```
 
-   重复执行会返回 409/400（用户名已存在），属于正常。
+   重复执行会返回 409/400（用户名已存在），属于正常。脚本自身登录时也会走同样的 CSRF 引导。
 
 3. 本机没有 k6 也可以：`run.ps1` 用 `grafana/k6` 镜像跑，脚本目录只读挂载进容器。
 

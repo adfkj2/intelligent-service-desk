@@ -250,11 +250,11 @@ WHERE id=? AND status='OPEN' AND version=?
 
 ### ADR-14 测试库：容器优先，本机回退
 
-- **背景**：102 个自动化测试全部依赖真实 MySQL（会话外置后还依赖 Redis），要求每台机器都装好 MySQL80 并配好 `application-local.yml`，换机器或进 CI 就跑不起来。
+- **背景**：105 个后端测试全部依赖真实 MySQL（会话外置后还依赖 Redis），要求每台机器都装好 MySQL80 并配好 `application-local.yml`，换机器或进 CI 就跑不起来。
 - **决策**：`AbstractIntegrationTest` 启动 `mysql:8.0.36` 与 `redis:7.4-alpine` 两个单例容器，用 `@DynamicPropertySource` 覆盖 `spring.datasource.*` 与 `spring.data.redis.*`；探测不到 Docker 时不注册属性，回退本机服务。`ISD_TEST_NO_DOCKER=true` 可强制回退。
 - **为什么容器放静态字段**：Spring 上下文会缓存复用，容器若随测试类停止，下一个复用同一上下文的测试类就连不上库。
 - **代价**：有 Docker 时每个测试 JVM 多 10–20 秒；没有 Docker 时探测会先等几秒再回退。
-- **CI**：GitHub Actions 三个 job 并行——后端 `./mvnw verify`（runner 自带 Docker，固定走容器模式，覆盖率门禁 + 报告上传），前端 `npm ci && npm run lint && npm run build`，以及镜像构建 `docker build`。用 wrapper 而不是裸 `mvn`，构建工具版本由仓库锁定。
+- **CI**：GitHub Actions 五个 job 并行——后端 `./mvnw verify`（runner 自带 Docker，固定走容器模式，覆盖率门禁 + 报告上传 + `@Test` 数字守卫），前端 `npm ci && npm audit && npm run lint && npm test && npm run build`，镜像构建 `docker build`，E2E（prod 栈 + Playwright），压测冒烟（k6）。用 wrapper 而不是裸 `mvn`，构建工具版本由仓库锁定。
 
 ### ADR-15 可观测性：按"边界 + 结果"建指标，比率只在查询侧算
 
@@ -315,7 +315,7 @@ WHERE id=? AND status='OPEN' AND version=?
 - **决策**：`CookieCsrfTokenRepository.withHttpOnlyFalse()` + `SpaCsrfTokenRequestHandler`。token 放 `XSRF-TOKEN` Cookie（故意允许 JS 读取），axios 同源请求自动复制到 `X-XSRF-TOKEN` 头，服务端比对。
 - **两个必须配的细节**：一是 Spring Security 6 默认用 XOR 处理器渲染 token，而 SPA 头里带的是 Cookie 明文，必须"渲染 XOR / 校验明文"分工，否则永远 403；二是用 `CsrfCookieFilter` 在第一个 GET 就 `getToken()` 把 Cookie 下发，否则登录页第一次 POST 必然 403 且前端无从补救。
 - **测试策略**：100 个 `perform(post(...))` 逐个加 `.with(csrf())` 是机械噪声且容易漏，改成 `MockMvcBuilderCustomizer` 统一注入"Cookie + 头成对"的合法 token（等价于浏览器行为）；另用未定制的 MockMvc 验证缺 token、Cookie 与头不一致都必须 403——保证"全绿"是因为校验被满足，而不是被关掉。
-- **代价**：token 不能设 HttpOnly，XSS 一旦成立这层失效；真正的兜底是 CSP 与输出转义（本项目尚未配 CSP，已列入已知限制）。每次写请求多一次 Cookie 读取与常量时间比较，开销可忽略。
+- **代价**：token 不能设 HttpOnly，XSS 一旦成立这层失效；真正的兜底是 CSP 与输出转义（见 ADR-22）。每次写请求多一次 Cookie 读取与常量时间比较，开销可忽略。
 
 ### ADR-21 生产形态：Nginx 终止 TLS，应用不暴露端口
 
@@ -325,6 +325,26 @@ WHERE id=? AND status='OPEN' AND version=?
 - **缓存边界**：只对 `/assets/`（内容哈希文件名）设 30 天缓存，`/api/` 与 `index.html` 绝不长缓存——否则发版后用户会拿到旧页面却调新接口。
 - **超时**：`proxy_read_timeout 90s`，大于 AI 的 30s 硬超时 + 重试预算；反代超时短于业务超时会把"慢"变成"502"，把可解释的降级变成不可解释的故障。
 - **代价**：自签证书只适合本地演示（浏览器告警）；真实环境需替换为可信证书，并考虑把 8082 管理端口的抓取改成 sidecar 或独立网络。
+
+### ADR-22 生产 CSP：属性开关 + 最小白名单
+
+- **背景**：CSRF token 必须可被 JS 读取（不能 HttpOnly），所以一旦 XSS 成立，Cookie 双提交这层就失效。浏览器侧唯一能同时削减"脚本能不能执行"与"数据能被发到哪"的机制是 CSP；不配 CSP，安全基线只到"有 CSRF"。
+- **决策**：`SecurityConfig` 按 `isd.security.csp.enabled`（默认 false）装配，只有 `application-prod.yml` 打开；策略集中在 `CspPolicy.PROD`：`default-src 'self'`、`script-src 'self'`（无 inline/eval）、`style-src 'self' 'unsafe-inline'`、`object-src 'none'`、`frame-ancestors 'none'`、`base-uri 'self'`、`form-action 'self'`、`connect-src 'self'`。
+- **为什么不放 Nginx**：与 HSTS 同理，避免两层重复头；更重要的是策略与测试同仓——`SecurityHeadersTest` 用两个 Spring 上下文分别断言"开时下发、关时不下发"，改策略必然过测试。
+- **为什么开发期关闭**：Vite HMR 需要 eval 与 WebSocket，Swagger UI 依赖内联脚本；一律开启会让本地调试全量报违规，最后大家会习惯性忽略 CSP 报错，比不配更糟。
+- **为什么 style 允许 inline**：Element Plus 的弹层/下拉靠 popper 写内联 style 定位；收紧会直接坏掉弹窗。允许内联样式不构成脚本执行风险，`script-src` 仍是最小集合。
+- **验证**：单元测试守开关；E2E 在真实 Chromium 里监听 `Refused to ...` 与 pageerror，违规即失败（见 ADR-23）。
+- **代价**：CSP 只在 prod 生效，开发期不覆盖；`'unsafe-inline'` 是已知放宽，未来可换 nonce/hash；新增第三方脚本（如埋点）会被直接拦下，需要同步改 `CspPolicy`。
+
+### ADR-23 E2E 与 CI 证据链：Playwright 打 prod 栈
+
+- **背景**：MockMvc 证明不了浏览器行为——Secure Cookie 只在 https 下回传、CSRF 头由 axios 自动注入、CSP 由浏览器执行、Vue 页面是否真的渲染出来。这些恰恰是"发布前最后一道"最容易假绿的地方；手工验收又不可复现。
+- **决策**：`@playwright/test` + Chromium，`baseURL` 默认 `https://localhost`（`E2E_BASE_URL` 可覆盖），`ignoreHTTPSErrors` 适配自签证书，`workers: 1` 避免并发抢工单状态，`trace: retain-on-failure` 留排障现场。一条主流程覆盖：员工登录建单 → 退出 → 技术支持接单/解决 → 退出 → 员工关闭，并断言状态标签为「已关闭」、CSP 响应头存在、全程无 CSP 违规与 pageerror。
+- **为什么不用 `storageState` 预登录**：会话 Cookie 是 `Secure + HttpOnly`，走 API 预置要手工拼 CSRF 双提交；三次 UI 登录只多约 6 秒，换来用例可读且更接近真实用户路径。
+- **为什么必须打 prod 栈**：prod 才有 `Secure` Cookie、CSP 与 Nginx；在 `http://localhost:8081` 下浏览器不回传 Secure Cookie，登录会"假失败"，排查方向会完全跑偏。
+- **种子账号**：`web/e2e/seed.sql` 直接写库，固定 BCrypt 哈希（10 轮）与 README 演示账号一致；比"注册接口 + SQL 提权"少两轮跨系统协作，且可重复执行。
+- **CI 证据链**：后端 `verify`（105 用例 + JaCoCo 门禁 + `@Test` 数字守卫）、前端 lint/test/audit/build、镜像构建、E2E、k6 冒烟五个 job 并行；Dependabot 每周提 PR 走同一套门禁。发布时把 CI run、覆盖率报告、压测报告三处链接写进 Release Notes。
+- **代价**：E2E 只覆盖一条主流程，视觉回归与边界页面仍未做；E2E 与镜像 job 各构建一次镜像，用重复构建换 job 间的独立性。
 
 ---
 

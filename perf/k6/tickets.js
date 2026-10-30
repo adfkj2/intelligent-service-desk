@@ -26,11 +26,11 @@ export const options = {
 }
 
 export function setup() {
-  const session = loginOnce()
+  const auth = loginOnce()
   const ids = []
   const total = Number(__ENV.SEED_TICKETS || 50)
   for (let i = 1; i <= total; i += 1) {
-    const res = createTicket(i)
+    const res = createTicket(i, 'perf-seed', auth)
     if (res.status === 201 || res.status === 200) {
       // 201 = 新建；200 = 幂等键重复，后端直接把上一次的结果返回（重跑时走这条）
       const id = res.json('data.id')
@@ -42,12 +42,12 @@ export function setup() {
     }
   }
   check(ids, { '种子工单可用': (list) => list.length > 0 })
-  return { ids, session }
+  return { ids, auth }
 }
 
 export default function (data) {
-  // 每轮迭代开始时 cookie jar 是空的，先把 setup 里拿到的 session 塞回去
-  useSession(data.session)
+  // 每轮迭代开始时 cookie jar 是空的，先把 setup 里拿到的会话与 CSRF 塞回去
+  useSession(data.auth)
 
   const page = 1 + Math.floor(Math.random() * 3)
   http.get(`${BASE_URL}/api/tickets?page=${page}&size=10`, { tags: { name: 'list' } })

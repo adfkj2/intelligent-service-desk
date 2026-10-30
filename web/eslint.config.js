@@ -36,5 +36,14 @@ export default [
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrors: 'none' }]
     }
   },
+  {
+    // Playwright 配置与 E2E 用例跑在 Node 里（process.env），不是浏览器
+    files: ['playwright.config.js', 'e2e/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node
+      }
+    }
+  },
   prettier
 ]

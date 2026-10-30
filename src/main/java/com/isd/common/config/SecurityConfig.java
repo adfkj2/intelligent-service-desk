@@ -7,6 +7,7 @@ import com.isd.common.exception.ErrorCode;
 import com.isd.common.metrics.IsdMetrics;
 import com.isd.common.result.ApiResponse;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -27,12 +28,14 @@ import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 /**
  * Spring Security 配置（Session 方案）。
  *
- * 三个关键取舍：
+ * 关键取舍：
  * 1. 开启 CSRF（Cookie 双提交）：Session Cookie 虽已设 SameSite=Lax，但 Lax 只挡住跨站表单的
  *    顶层导航，挡不住同站子域与老浏览器；用 CookieCsrfTokenRepository 让前端在请求头回传 token，
  *    才算真正验证"请求来自我们的页面"。细节见 {@link SpaCsrfTokenRequestHandler}。
  * 2. 关闭 formLogin / httpBasic：只保留我们自己的 JSON 登录接口，避免暴露默认登录页与 Basic 认证入口。
  * 3. 401/403 也必须返回统一 JSON 结构，否则前端的 axios 拦截器拿到的是一段 HTML。
+ * 4. CSP 按属性开关装配（{@code isd.security.csp.enabled}），只在 prod profile 打开：
+ *    开发期 Vite HMR 需要 eval/WebSocket，Swagger UI 依赖内联脚本，一律开启会让本地调试不可用。
  */
 @Configuration
 public class SecurityConfig {
@@ -57,7 +60,9 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
                                                    SecurityContextRepository securityContextRepository,
                                                    ObjectMapper objectMapper,
-                                                   IsdMetrics metrics) throws Exception {
+                                                   IsdMetrics metrics,
+                                                   @Value("${isd.security.csp.enabled:false}") boolean cspEnabled)
+            throws Exception {
         http
                 /*
                  * CSRF 用 Cookie 双提交：token 放在可被 JS 读到的 XSRF-TOKEN Cookie 里，
@@ -70,6 +75,15 @@ public class SecurityConfig {
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .logout(AbstractHttpConfigurer::disable)
+                /*
+                 * CSP 只决定"加载/执行什么"，与业务无关，所以放在 headers 里统一输出。
+                 * 生产开启后由 Nginx 原样透传给浏览器；策略集中在 CspPolicy，测试守护开/关两种形态。
+                 */
+                .headers(headers -> {
+                    if (cspEnabled) {
+                        headers.contentSecurityPolicy(csp -> csp.policyDirectives(CspPolicy.PROD));
+                    }
+                })
                 .securityContext(context -> context.securityContextRepository(securityContextRepository))
                 // 首个 GET 就要把 XSRF-TOKEN 下发，否则登录页的第一次 POST 无从带 token
                 .addFilterAfter(new CsrfCookieFilter(), BasicAuthenticationFilter.class)

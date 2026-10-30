@@ -139,7 +139,7 @@ async function submitAssign() {
               <h1 class="m-0 text-[20px] font-semibold leading-7 text-ink-900">{{ ticket.title }}</h1>
               <p class="m-0 mt-1 text-[12px] text-ink-400">{{ ticket.ticketNo }}</p>
             </div>
-            <StatusTag :status="ticket.status" />
+            <StatusTag :status="ticket.status" data-testid="ticket-status" />
           </div>
 
           <el-descriptions :column="2" class="mt-5" border size="small">
@@ -169,12 +169,32 @@ async function submitAssign() {
           <p class="m-0 text-[14px] font-medium text-ink-900">可执行操作</p>
 
           <div class="mt-3 space-y-2">
-            <el-button v-if="canClaim" type="primary" class="w-full" @click="claim">接单处理</el-button>
+            <el-button
+              v-if="canClaim"
+              type="primary"
+              class="w-full"
+              data-testid="action-claim"
+              @click="claim"
+            >
+              接单处理
+            </el-button>
             <el-button v-if="canAssign" type="danger" plain class="w-full" @click="openAssign">指派给技术支持</el-button>
-            <el-button v-if="canResolve" type="success" class="w-full" @click="openAction('RESOLVE')">
+            <el-button
+              v-if="canResolve"
+              type="success"
+              class="w-full"
+              data-testid="action-resolve"
+              @click="openAction('RESOLVE')"
+            >
               标记为已解决
             </el-button>
-            <el-button v-if="canClose" type="primary" class="w-full" @click="openAction('CLOSE')">
+            <el-button
+              v-if="canClose"
+              type="primary"
+              class="w-full"
+              data-testid="action-close"
+              @click="openAction('CLOSE')"
+            >
               确认关闭工单
             </el-button>
 
@@ -233,7 +253,9 @@ async function submitAssign() {
       />
       <template #footer>
         <el-button @click="actionVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitAction">确认</el-button>
+        <el-button type="primary" data-testid="action-confirm" :loading="submitting" @click="submitAction">
+          确认
+        </el-button>
       </template>
     </el-dialog>
 

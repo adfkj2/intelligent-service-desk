@@ -28,6 +28,9 @@
 两个脚本都用固定 `Idempotency-Key` 造数据（`perf-seed-<n>`），重跑不会重复插入；
 会话在 `setup()` 登录一次，之后每个迭代用 `cookieJar().set` 塞回（k6 每轮迭代会清空 cookie jar）。
 
+> CSRF 双提交上线后，脚本在登录前会先 `GET /api/ping` 取 `XSRF-TOKEN`，再把同一个值放进
+> `X-XSRF-TOKEN` 头——漏掉这一步，登录与建单都会被 403，压测会直接失败而不是"数字变小"。
+
 ## 3. 结果：工单读路径（预热后，2000 条数据）
 
 | 指标 | 值 |
@@ -88,3 +91,20 @@ docker compose -f docker-compose.stack.yml down -v           # 清掉压测数�
 
 阈值写死在脚本的 `options.thresholds` 里：列表 p95 < 300 ms、关键词列表 p95 < 500 ms、详情 p95 < 200 ms、
 AI 5xx == 0。**跑不过就是退出码非 0**，所以这些数字不会随代码改动悄悄失效。
+
+## 7. CI 冒烟压测
+
+`.github/workflows/ci.yml` 的 `perf` job 会在每次 push / PR 跑一轮冒烟，防止"某个改动让 p95 数量级退化"却没人发现。
+
+| 项 | 完整压测（本文 3–4 节） | CI 冒烟 |
+|---|---|---|
+| 拓扑 | `docker-compose.stack.yml` | 同 |
+| 并发 / 时长 | 10 VU / 20s | 5 VU / 5s |
+| 种子工单 | 2000 | 200 |
+| AI 迭代 | 1 VU × 25 次 | 同 |
+| 阈值 | 脚本内 `options.thresholds` | **完全一致，不放宽** |
+| 用途 | 出报告、找瓶颈 | 防回归，跑不过即红 |
+
+只允许用 `VUS` / `DURATION` / `SEED_TICKETS` 缩短时间，不允许为了让 CI 变绿而改阈值——那等于把门禁关掉。
+另外，GitHub 共享 runner 是 2 核且与容器抢 CPU，**绝对延迟不能和本机数字对比**；冒烟只保证没有数量级退化。
+日志与退出码就是证据，失败时在 Actions 的 `perf` job 里能看到每个 threshold 的实际值与是否通过。

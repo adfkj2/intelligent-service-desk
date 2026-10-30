@@ -136,11 +136,17 @@ function fillDemo() {
 
         <el-form ref="loginFormRef" :model="form" :rules="rules" label-position="top" @submit.prevent>
           <el-form-item label="用户名" prop="username">
-            <el-input v-model="form.username" size="large" placeholder="请输入用户名" />
+            <el-input
+              v-model="form.username"
+              data-testid="login-username"
+              size="large"
+              placeholder="请输入用户名"
+            />
           </el-form-item>
           <el-form-item label="密码" prop="password">
             <el-input
               v-model="form.password"
+              data-testid="login-password"
               type="password"
               size="large"
               show-password
@@ -148,7 +154,14 @@ function fillDemo() {
               @keyup.enter="doLogin"
             />
           </el-form-item>
-          <el-button type="primary" size="large" class="w-full" :loading="loading" @click="doLogin">
+          <el-button
+            type="primary"
+            size="large"
+            class="w-full"
+            data-testid="login-submit"
+            :loading="loading"
+            @click="doLogin"
+          >
             登录
           </el-button>
         </el-form>

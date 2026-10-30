@@ -75,7 +75,13 @@ function submit() {
     <div class="isd-card mx-auto max-w-[640px] p-6">
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
         <el-form-item label="标题" prop="title">
-          <el-input v-model="form.title" maxlength="128" show-word-limit placeholder="一句话说明问题，例如：3 楼打印机无法连接" />
+          <el-input
+            v-model="form.title"
+            data-testid="ticket-title"
+            maxlength="128"
+            show-word-limit
+            placeholder="一句话说明问题，例如：3 楼打印机无法连接"
+          />
         </el-form-item>
 
         <div class="grid grid-cols-2 gap-4">
@@ -105,7 +111,9 @@ function submit() {
 
         <div class="mt-2 flex items-center justify-end gap-2">
           <el-button @click="router.push({ name: 'tickets' })">取消</el-button>
-          <el-button type="primary" :loading="submitting" @click="submit">提交工单</el-button>
+          <el-button type="primary" data-testid="ticket-submit" :loading="submitting" @click="submit">
+            提交工单
+          </el-button>
         </div>
       </el-form>
     </div>

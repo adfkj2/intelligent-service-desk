@@ -32,3 +32,7 @@ deploy/certs/*.crt
 deploy/certs/*.key
 deploy/certs/*.pem
 deploy/certs/*.p12
+
+# Playwright E2E artifacts
+web/playwright-report/
+web/test-results/

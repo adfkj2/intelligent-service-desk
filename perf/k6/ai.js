@@ -1,7 +1,7 @@
 import http from 'k6/http'
 import { check } from 'k6'
 import { Counter } from 'k6/metrics'
-import { BASE_URL, JSON_HEADERS, loginOnce, useSession } from './common.js'
+import { BASE_URL, authHeaders, loginOnce, useSession } from './common.js'
 
 /**
  * AI 路径压测：验证的不是吞吐，而是两条护栏是否真的生效。
@@ -36,16 +36,16 @@ export const options = {
 
 export function setup() {
   // 会话只登录一次：cookie jar 每轮迭代会被重置，所以由 useSession 在迭代开始时塞回去
-  return { session: loginOnce() }
+  return { auth: loginOnce() }
 }
 
 export default function (data) {
-  useSession(data.session)
+  useSession(data.auth)
 
   const res = http.post(
     `${BASE_URL}/api/ai/chat`,
     JSON.stringify({ question: '如何重置密码？' }),
-    { headers: JSON_HEADERS, tags: { name: 'ai_chat' } }
+    { headers: authHeaders(data.auth), tags: { name: 'ai_chat' } }
   )
 
   if (res.status === 200) {

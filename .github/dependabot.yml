@@ -1,0 +1,37 @@
+version: 2
+
+# 依赖升级走 PR + 现有 CI 门禁：能升级才合，不能升级就留作待办。
+# open-pull-requests-limit 压到 3，避免一次刷出十几个 PR 把真正的改动埋掉。
+updates:
+  - package-ecosystem: maven
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "build(deps)"
+
+  - package-ecosystem: npm
+    directory: "/web"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "build(deps)"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "ci(deps)"
+
+  # Dockerfile 与 docker-compose 里的基础镜像（mysql / redis / nginx / k6 等）
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "build(docker)"

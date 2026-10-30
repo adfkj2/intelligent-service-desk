@@ -11,7 +11,7 @@
 > 第四块是 AI 助手——它只能查当前用户自己的工单和知识库，不能执行任何写操作。
 > 技术栈是 Spring Boot 3.5 + MyBatis + MySQL + Spring Security，AI 部分用 Spring AI 接 DeepSeek 做 Function Calling。
 > 重点做了两件事：**工单状态机的并发正确性**（乐观锁 + 双线程冲突测试）和 **AI 工具的权限隔离**（工具签名不带 userId，身份只从 SecurityContext 取）。
-> 一共 33 个接口、8 张业务表、102 个自动化测试（Flyway 迁移 + Testcontainers + GitHub Actions + Micrometer 指标）。
+> 一共 33 个接口、8 张业务表、105 个后端自动化测试 + 1 条 Playwright E2E（Flyway 迁移 + Testcontainers + GitHub Actions + Micrometer 指标）。
 
 ---
 
@@ -108,7 +108,11 @@ WHERE id=? AND status='OPEN' AND version=?
 
 **Q20：Session 方案要注意什么攻击？**
 一句话：会话固定（登录后 `changeSessionId()`）、CSRF（Cookie 双提交 + `SameSite=Lax` 纵深防御）、XSS（会话 Cookie `http-only`）。
-展开：CSRF 用 `CookieCsrfTokenRepository.withHttpOnlyFalse()` 下发 `XSRF-TOKEN`，前端 axios 默认就把 Cookie 值复制到 `X-XSRF-TOKEN` 头，服务端比对。两个容易踩的坑：一是 Spring Security 6 默认用 XOR 处理器渲染 token，而 SPA 头里带的是 Cookie 明文，不换成"渲染 XOR / 校验明文"的 `SpaCsrfTokenRequestHandler` 就会永远 403；二是必须用 `CsrfCookieFilter` 在第一个 GET 就下发 Cookie，否则登录页第一次 POST 无从带 token。代价是 token 必须可被 JS 读取（不能 HttpOnly），所以 XSS 一旦成立这层就失效——真正的兜底仍是 CSP 与转义，这一点写进了已知限制。测试侧没有在 100 个 `perform(post(...))` 上逐个加 `csrf()`，而是用 `MockMvcBuilderCustomizer` 统一注入合法 token，另用未定制的 MockMvc 验证"缺 token / 不一致必须 403"。
+展开：CSRF 用 `CookieCsrfTokenRepository.withHttpOnlyFalse()` 下发 `XSRF-TOKEN`，前端 axios 默认就把 Cookie 值复制到 `X-XSRF-TOKEN` 头，服务端比对。两个容易踩的坑：一是 Spring Security 6 默认用 XOR 处理器渲染 token，而 SPA 头里带的是 Cookie 明文，不换成"渲染 XOR / 校验明文"的 `SpaCsrfTokenRequestHandler` 就会永远 403；二是必须用 `CsrfCookieFilter` 在第一个 GET 就下发 Cookie，否则登录页第一次 POST 无从带 token。代价是 token 必须可被 JS 读取（不能 HttpOnly），所以 XSS 一旦成立这层就失效——兜底是 CSP 与输出转义（见 Q20b）。测试侧没有在上百个 `perform(post(...))` 上逐个加 `csrf()`，而是用 `MockMvcBuilderCustomizer` 统一注入合法 token，另用未定制的 MockMvc 验证"缺 token / 不一致必须 403"。
+
+**Q20b：CSP 怎么配的？为什么开发期不启用？**
+一句话：`isd.security.csp.enabled` 开关，只有 prod profile 打开；策略集中在 `CspPolicy.PROD`，`script-src 'self'`，不放开 inline/eval。
+展开：`style-src` 必须保留 `'unsafe-inline'`，因为 Element Plus 的弹层靠内联 style 定位，收紧会直接坏掉弹窗；允许内联样式不构成脚本执行风险。开发期关闭不是偷懒：Vite HMR 需要 eval 与 WebSocket，Swagger UI 依赖内联脚本，一律开启会让本地调试全量报违规，最后大家会习惯性忽略 CSP 报错，比不配更糟。验证有两层：`SecurityHeadersTest` 用两个上下文断言"开时下发、关时不下发"，E2E 在真实 Chromium 里监听 `Refused to ...`，出现违规即失败——避免"头存在但页面被自己拦坏"。
 
 **Q21：手工登录为什么必须 `saveContext`？**
 一句话：Spring Security 6 默认 `requireExplicitSave`，不保存的话下一个请求还是匿名的。
@@ -276,8 +280,12 @@ WHERE id=? AND status='OPEN' AND version=?
 展开：容器放在静态字段里只启动一次——Spring 上下文会缓存复用，容器若跟着测试类停止，下一个类就连不上库。这是我踩过的坑：一开始按类启停，第二个测试类必挂。
 
 **Q53：CI 怎么设计的？**
-一句话：三个并行 job——后端 `./mvnw verify`（runner 自带 Docker，固定走容器模式）、前端 `npm ci && npm run lint && npm run build`、镜像 `docker build`（不推送）。
-展开：`verify` 一次覆盖编译、102 个用例、JaCoCo 行覆盖门禁（≥90%）与打 jar，覆盖率报告与 surefire 报告都作为 CI 产物上传，失败时也传——恰恰是失败的时候最需要看哪一行没被覆盖。前端 job 是 `npm ci` → `npm run lint` → `npm test` → `npm run build`：未定义变量这类问题 lint 就拦住，拦截器/store 的逻辑坏了构建照样成功、只有单测能发现。第三个 job 专门接住"只在本地能构建"的退化：依赖本机 `static/`、忘写 `.dockerignore`、少 copy 一个文件，本地能过、CI 必红。`concurrency` 让同分支的旧流水线自动取消，省 runner 时间。
+一句话：五个并行 job——后端 `./mvnw verify`（runner 自带 Docker，固定走容器模式）、前端 lint/test/audit/build、镜像 `docker build`（不推送）、E2E（Playwright 打 prod 栈）、压测冒烟（k6）。
+展开：`verify` 一次覆盖编译、105 个用例、JaCoCo 行覆盖门禁（≥90%）与打 jar，之后统计 `@Test` 数与 README「关键数字」比对（加用例没同步文档就红），覆盖率与 surefire 报告都作为产物上传、失败时也传——恰恰是失败的时候最需要看哪一行没被覆盖。前端 job 是 `npm ci` → `npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org` → `npm run lint` → `npm test` → `npm run build`：未定义变量这类问题 lint 就拦住，拦截器/store 的逻辑坏了构建照样成功、只有单测能发现；audit 只拦生产依赖，devDeps 的噪音不阻塞发版。镜像 job 专门接住"只在本地能构建"的退化：依赖本机 `static/`、忘写 `.dockerignore`、少 copy 一个文件，本地能过、CI 必红。E2E job 生成自签证书、起 `docker-compose.prod.yml`、灌 `seed.sql`、用 Chromium 跑建单→接单→解决→关闭主流程；压测 job 起 stack 栈，用 `grafana/k6` 跑 5 VU / 5s 冒烟，阈值与完整压测一致。`concurrency` 让同分支的旧流水线自动取消，省 runner 时间。
+
+**Q53c：为什么 E2E 一定要打 https 的 prod 栈，不能用 8081 的 stack？**
+一句话：prod profile 的会话 Cookie 带 `Secure`，在 `http://localhost:8081` 下浏览器根本不回传，登录会"假失败"。
+展开：`docker-compose.stack.yml` 适合演示，但它没有 TLS、没有 CSP、也没有 Nginx 这一层；E2E 要验证的恰恰是这三样。prod 栈里 app 不映射宿主机端口，入口只有 `https://localhost`，Playwright 用 `ignoreHTTPSErrors` 接受自签证书。另外单 worker 是刻意的：所有用例共用一个库，并发跑会互相抢工单状态，得到"偶发 409"这种最难查的失败；失败时保留 trace，CI 上传报告，本地可以直接回放。
 
 **Q53b：除了 CI，部署上做了什么让"换台机器也能跑"？**
 一句话：数据源与 Redis 地址全部走环境变量，`docker-compose.stack.yml` 一条命令起 app + MySQL + Redis，Flyway 启动即建表；本地开发默认值不变，所以老流程照旧。
@@ -314,7 +322,7 @@ WHERE id=? AND status='OPEN' AND version=?
 
 - 基于 **Spring Boot 3.5 + MyBatis + MySQL** 独立开发企业 IT 服务台，覆盖工单全生命周期（创建/接单/指派/解决/关闭）、知识库与站内信，共 33 个 REST 接口、8 张表。
 - 工单状态流转用**枚举迁移白名单 + 乐观锁**保证并发正确性，编写 `CountDownLatch` 双线程冲突测试，验证同一工单并发接单**恰好一人成功**（另一人 409），并配套 4 表审计日志；用户管理同样用 `version` 条件更新 + 管理员行锁，避免两个管理员互相降权后系统失去管理员。
-- 基于 **Spring AI（DeepSeek）** 实现只读 AI 助手：工具签名不透传 userId、身份取自 SecurityContext，杜绝提示注入越权；加入 30s 硬超时与知识库降级，AI 故障不影响主业务。累计 **102 个自动化测试**全部通过。
+- 基于 **Spring AI（DeepSeek）** 实现只读 AI 助手：工具签名不透传 userId、身份取自 SecurityContext，杜绝提示注入越权；加入 30s 硬超时与知识库降级，AI 故障不影响主业务。累计 **105 个后端测试**全部通过（行覆盖 92%+，CI 有门禁），另有 Playwright 主流程 E2E 与 k6 冒烟压测进 CI。
 
 ---
 
@@ -329,7 +337,9 @@ WHERE id=? AND status='OPEN' AND version=?
 | 角色 | 3（EMPLOYEE / SUPPORT / ADMIN） |
 | AI 工具 | 2（查工单 / 查知识库） |
 | AI 超时 | 30 秒（可配） |
-| 测试用例 | 102 |
+| 后端测试用例 | 105 |
+| 前端单测 / E2E | 25 / 1（Playwright 主流程） |
+| 安全响应头 | CSP（prod）+ HSTS + X-Content-Type-Options + X-Frame-Options |
 | 前端页面 | 8（登录 / 修改密码 / 工作台 / 工单列表 / 详情 / 新建 / 知识库 / 用户管理）+ AI 抽屉 |
 | 前端主包 | gzip 约 410KB（Element Plus 全量引入） |
 | 端口 | 8081（开发期前端 5173 代理到 8081） |
