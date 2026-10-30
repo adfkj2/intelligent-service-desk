@@ -16,7 +16,7 @@ COPY web/ ./
 RUN npm run build
 
 # ---------- 2. 后端 ----------
-FROM maven:3.9-eclipse-temurin-21 AS backend
+FROM maven:3.9-eclipse-temurin-26 AS backend
 
 WORKDIR /build
 # 可选 Maven 镜像：默认走 Maven Central（CI 用默认即可）；
