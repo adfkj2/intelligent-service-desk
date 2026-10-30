@@ -1,0 +1,31 @@
+# 生产 profile：由容器/反代环境启用（SPRING_PROFILES_ACTIVE=prod）。
+#
+# 只放"和本地开发必须不同"的配置。业务参数（限流阈值、保留天数）沿用 application.yml，
+# 需要按现场调整时用环境变量覆盖，不再复制一份 YAML——两份配置最容易漂移。
+server:
+  # Nginx 终止 TLS 后只转 HTTP，靠 X-Forwarded-* 还原协议与客户端 IP；
+  # framework 模式让 Spring 自己解析这些头，redirect 与 Cookie 的 Secure 判断才正确。
+  forward-headers-strategy: framework
+  servlet:
+    session:
+      cookie:
+        # 生产必须走 HTTPS，Cookie 加 Secure：即使被降级到 http 也不会明文传输会话
+        secure: true
+
+springdoc:
+  # 接口文档只在内网/开发可见；生产关掉，避免把全部路由与参数结构暴露给扫描器
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+management:
+  server:
+    # 保持只绑回环：容器内由 Prometheus sidecar 抓取，宿主机不映射 8082
+    address: 127.0.0.1
+
+logging:
+  level:
+    # 生产不打 SQL 与框架 DEBUG：日志量会淹没真正的错误，也拖慢 IO
+    root: INFO
+    com.isd: INFO

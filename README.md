@@ -178,9 +178,10 @@ UPDATE sys_user SET role = 'ADMIN' WHERE username = 'demo_admin';
 |---|---|---|
 | 本机开发 | `docker compose up -d` + IDEA 运行 `IsdApplication` | 改代码热更新；MySQL 用本机 `MySQL80` |
 | **全栈容器** | `docker compose -f docker-compose.stack.yml up -d --build` | 新机器、演示、验收；MySQL 与 Redis 都在容器里 |
+| **生产向（TLS）** | `.\deploy\certs\generate.ps1` + `docker compose -f docker-compose.prod.yml up -d --build` | 经 Nginx + HTTPS 访问，app 不暴露 8081（见下一节） |
 | 仅打包 | `./mvnw -DskipTests package`（需先 `cd web && npm run build`） | 只要一个可运行的 jar |
 
-> 两个 compose 文件都在仓库根目录，属于同一个 compose 项目（服务名 `redis` 也同名），**只能二选一，不要同时启动**：`docker-compose.yml` 只起一个映射 6379 的 Redis（本地开发用），`docker-compose.stack.yml` 起 MySQL + Redis + 应用且不占宿主机 3306/6379，所以全栈栈可以和你本机的 MySQL80 共存。切回去之前先 `docker compose -f docker-compose.stack.yml down`。
+> 三个 compose 文件是**三个独立项目**（项目名分别是 `intelligentservicedesk` / `isd-stack` / `isd-prod`），容器名与端口互不冲突：开发依赖那个只占用 6379，全栈栈只占用 8081，生产向只占用 80/443。技术上可以同时起，但没必要——同时跑两套 Redis 只是平白多占内存，实际使用时挑一种即可。
 
 全栈栈包含三个服务：`mysql`（8.0.36，数据卷 `isd-mysql-data`）、`redis`（7.4，开启 `notify-keyspace-events`）、`app`（本仓库 `Dockerfile` 构建，`8081:8081`）。`app` 用 `depends_on: service_healthy` 等两个依赖真的可用再启动，Flyway 随后自动建库建表（8 张业务表）。
 
@@ -206,6 +207,33 @@ docker build --build-arg MAVEN_MIRROR_URL=https://maven.aliyun.com/repository/pu
 - 前端在镜像内构建：`src/main/resources/static/` 被 `.gitignore` 排除，镜像不能依赖本机是否构建过前端；
 - 运行时用非 root 用户 `isd`，`HEALTHCHECK` 打容器内 `127.0.0.1:8082/actuator/health`（管理端口只绑本机，所以宿主机访问不到 8082，健康状态看 `docker ps` 的 `(healthy)`）；
 - `.dockerignore` 排除了 `target/`、`web/node_modules/`、`static/` 与 `application-local.yml`（含真实密码/Key），构建上下文只有几 MB，也不会把密钥打进镜像。
+
+### 9. 生产形态：Nginx + TLS 反代（可选）
+
+`docker-compose.prod.yml` 在栈上再加一层 Nginx：TLS 终止、HSTS、gzip、静态资源长缓存，**app 不再映射宿主机端口**——绕过反代直连 8081 这条路被堵死。
+
+```powershell
+.\deploy\certs\generate.ps1        # 自签证书；本机没 openssl 时自动借用 maven 镜像里的 openssl
+docker compose -f docker-compose.prod.yml up -d --build
+curl -k https://localhost/api/ping # 浏览器会告警，点"继续访问"即可（仅本地演示）
+docker compose -f docker-compose.prod.yml down
+```
+
+日志统一走 stdout/stderr（`docker compose logs nginx|app`），不额外挂日志卷；证书文件已被 `.gitignore` 排除，仓库里只有生成脚本。
+
+实测验收（本机，`isd-prod` 项目）：
+
+| 检查 | 命令 | 结果 |
+|---|---|---|
+| HTTP 强制跳 HTTPS | `curl -s -o NUL -w "%{http_code}" http://localhost/api/ping` | `301` |
+| HTTPS 可用 | `curl -k -s -o NUL -w "%{http_code}" https://localhost/api/ping` | `200` |
+| 会话 Cookie 加 Secure | 登录响应 `Set-Cookie` | `SESSION=...; Path=/; Secure; HttpOnly; SameSite=Lax` |
+| CSRF 缺 token 被拒 | `POST /api/auth/register`（不带 `X-XSRF-TOKEN`） | `403` + `{"code":40300}` |
+| CSRF 带 token 通过 | 同上 + `-H "X-XSRF-TOKEN: <XSRF-TOKEN 值>"` | 201/200 + `{"code":0}` |
+| 应用端口不对外 | 访问 `http://localhost:8081` | 连接超时（无映射，符合预期） |
+| 安全响应头 | `curl -k -D - https://localhost/api/ping` | `Strict-Transport-Security` / `X-Content-Type-Options` / `X-Frame-Options` 各一份，另加 Nginx 的 `Referrer-Policy` |
+
+> 三条安全头只由 Spring Security 输出，Nginx 不再重复添加（实测两边都加会出现重复响应头）。生产 profile（`SPRING_PROFILES_ACTIVE=prod`）还会：关掉 Swagger 文档、把 `forward-headers-strategy` 设为 `framework` 以还原 `X-Forwarded-Proto`、把管理端口继续绑在容器内 `127.0.0.1:8082`。
 
 ---
 

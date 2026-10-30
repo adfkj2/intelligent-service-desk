@@ -26,3 +26,9 @@ web/node_modules/
 src/main/resources/static/
 # 单测覆盖率产物（npm run test:coverage 生成）
 web/coverage/
+
+# 本地自签证书（deploy/certs/generate.ps1 生成，只提交脚本）
+deploy/certs/*.crt
+deploy/certs/*.key
+deploy/certs/*.pem
+deploy/certs/*.p12

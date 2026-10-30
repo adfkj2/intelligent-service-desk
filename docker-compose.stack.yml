@@ -5,8 +5,9 @@
 #   docker compose -f docker-compose.stack.yml down -v       # 连数据一起删
 #
 # 与 docker-compose.yml 的关系：那个只管开发依赖（只有 Redis，MySQL 用本机）。
-# 本文件把 MySQL 与 Redis 都容器化，管理端口不占用宿主机 3306/6379，避免和本机 MySQL80 冲突。
-# 两个文件属于同一个 compose 项目（服务名 redis 同名），只能二选一，不要同时启动。
+# 本文件把 MySQL 与 Redis 都容器化，且不占用宿主机 3306/6379，避免和本机 MySQL80 冲突。
+# 三者是独立项目（intelligentservicedesk / isd-stack / isd-prod），端口不冲突；
+# 同时起只会白占内存，实际使用时挑一种。
 
 name: isd-stack
 
