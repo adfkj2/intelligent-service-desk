@@ -105,7 +105,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # 不推送，只为拦住"只在本地机器能构建"的退化（缺文件、依赖本机 static、忘记 .dockerignore）
       - name: 构建镜像
