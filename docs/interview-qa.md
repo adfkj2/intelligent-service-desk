@@ -107,8 +107,8 @@ WHERE id=? AND status='OPEN' AND version=?
 展开：不自己写 MD5+盐；BCrypt 的 cost 让暴力破解成本指数上升；登录失败不区分"用户不存在"和"密码错误"，防账号枚举。
 
 **Q20：Session 方案要注意什么攻击？**
-一句话：会话固定（登录后 `changeSessionId()`）、CSRF（SameSite=Lax + 关闭 CSRF 的取舍）、XSS（Cookie `http-only`）。
-展开：生产如需更强，用 `CookieCsrfTokenRepository` 双提交。
+一句话：会话固定（登录后 `changeSessionId()`）、CSRF（Cookie 双提交 + `SameSite=Lax` 纵深防御）、XSS（会话 Cookie `http-only`）。
+展开：CSRF 用 `CookieCsrfTokenRepository.withHttpOnlyFalse()` 下发 `XSRF-TOKEN`，前端 axios 默认就把 Cookie 值复制到 `X-XSRF-TOKEN` 头，服务端比对。两个容易踩的坑：一是 Spring Security 6 默认用 XOR 处理器渲染 token，而 SPA 头里带的是 Cookie 明文，不换成"渲染 XOR / 校验明文"的 `SpaCsrfTokenRequestHandler` 就会永远 403；二是必须用 `CsrfCookieFilter` 在第一个 GET 就下发 Cookie，否则登录页第一次 POST 无从带 token。代价是 token 必须可被 JS 读取（不能 HttpOnly），所以 XSS 一旦成立这层就失效——真正的兜底仍是 CSP 与转义，这一点写进了已知限制。测试侧没有在 100 个 `perform(post(...))` 上逐个加 `csrf()`，而是用 `MockMvcBuilderCustomizer` 统一注入合法 token，另用未定制的 MockMvc 验证"缺 token / 不一致必须 403"。
 
 **Q21：手工登录为什么必须 `saveContext`？**
 一句话：Spring Security 6 默认 `requireExplicitSave`，不保存的话下一个请求还是匿名的。
@@ -277,7 +277,7 @@ WHERE id=? AND status='OPEN' AND version=?
 
 **Q53：CI 怎么设计的？**
 一句话：三个并行 job——后端 `./mvnw verify`（runner 自带 Docker，固定走容器模式）、前端 `npm ci && npm run lint && npm run build`、镜像 `docker build`（不推送）。
-展开：`verify` 一次覆盖编译、102 个用例、JaCoCo 行覆盖门禁（≥90%）与打 jar，覆盖率报告与 surefire 报告都作为 CI 产物上传，失败时也传——恰恰是失败的时候最需要看哪一行没被覆盖。前端 job 先 lint 再构建：未定义变量、`v-for` 缺 `:key` 这类问题比"产物能不能生成"更早暴露。第三个 job 专门接住"只在本地能构建"的退化：依赖本机 `static/`、忘写 `.dockerignore`、少 copy 一个文件，本地能过、CI 必红。`concurrency` 让同分支的旧流水线自动取消，省 runner 时间。
+展开：`verify` 一次覆盖编译、102 个用例、JaCoCo 行覆盖门禁（≥90%）与打 jar，覆盖率报告与 surefire 报告都作为 CI 产物上传，失败时也传——恰恰是失败的时候最需要看哪一行没被覆盖。前端 job 是 `npm ci` → `npm run lint` → `npm test` → `npm run build`：未定义变量这类问题 lint 就拦住，拦截器/store 的逻辑坏了构建照样成功、只有单测能发现。第三个 job 专门接住"只在本地能构建"的退化：依赖本机 `static/`、忘写 `.dockerignore`、少 copy 一个文件，本地能过、CI 必红。`concurrency` 让同分支的旧流水线自动取消，省 runner 时间。
 
 **Q53b：除了 CI，部署上做了什么让"换台机器也能跑"？**
 一句话：数据源与 Redis 地址全部走环境变量，`docker-compose.stack.yml` 一条命令起 app + MySQL + Redis，Flyway 启动即建表；本地开发默认值不变，所以老流程照旧。

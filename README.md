@@ -370,11 +370,18 @@ src/main/resources/
 ├── db/bootstrap.sql   只建库（可选，日常用 createDatabaseIfNotExist）
 └── static/            前端构建产物（npm run build 生成，已 git 忽略）
 
-.github/workflows/ci.yml   后端 ./mvnw verify（Testcontainers）+ 前端 npm lint/build + 镜像构建
+.github/workflows/ci.yml   后端 ./mvnw verify（Testcontainers）+ 前端 lint/test/build + 镜像构建
 mvnw / mvnw.cmd / .mvn/    Maven Wrapper，锁定 Maven 3.9.16，免装 Maven
+.gitattributes             行尾策略：文本 LF、cmd CRLF，避免 wrapper 在 Linux 上坏掉
+Dockerfile                 三阶段：Node 构建前端 → Maven 打包 → JRE 运行（非 root + HEALTHCHECK）
+docker-compose*.yml        dev（仅 Redis）/ stack（全栈）/ prod（+ Nginx TLS 反代）
+deploy/                    nginx.conf + 站点配置 + 自签证书生成脚本（证书本身 git 忽略）
+perf/k6/                   k6 压测脚本：工单读路径、AI 降级与配额
 
 web/                   前端工程（独立 npm 包，构建产物回灌 src/main/resources/static）
 ├── vite.config.js     /api 代理到 8081；outDir 指向后端 static
+├── vitest.config.js   单测配置（jsdom + Vue Test Utils，与构建配置解耦）
+├── tests/             25 个单测：请求拦截器、会话 store、回跳校验、通知铃铛
 ├── src/api/           axios 实例（解包 data、统一 401/403/409）
 ├── src/router/        history 模式 + 登录守卫 + 角色路由
 ├── src/stores/        会话用户（只存身份，不存 token）
@@ -485,6 +492,7 @@ CI 在 `.github/workflows/ci.yml`，三个 job 都是硬门禁：
 - 工单号仍是"日期 + 4 位随机数 + 重试"，未换雪花/序列
 - 前端只有 25 个单测（请求拦截器、会话 store、回跳校验、通知铃铛），覆盖的是"跑错会静默出错"的逻辑；页面级 E2E 与视觉回归仍未做，靠手工验收清单兜底
 - Element Plus 全量引入（主包 gzip 约 410KB），内网可接受；按需引入留作优化项
+- 压测脚本没接进 CI：需要先起全栈并造数据，一轮约 1 分钟，目前是提交前手动跑；阈值写死在脚本里，跑不过会非 0 退出，所以数据不会悄悄失真
 - 会话强依赖 Redis：Redis 不可用时应用启动失败（刻意不做内存降级）；Redis 侧需要开启 keyspace 事件通知才能统计 `reason=expired`
 - 每次请求多一次 Redis 往返（Lettuce 连接复用，通常亚毫秒），换来多实例部署下的会话一致性；未做会话本地缓存，避免「缓存未失效导致踢人不生效」
 

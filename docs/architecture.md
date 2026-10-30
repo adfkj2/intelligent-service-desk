@@ -309,6 +309,23 @@ WHERE id=? AND status='OPEN' AND version=?
 - **为什么不用一个事务包住整轮**：单条 DELETE 本身原子，锁只在语句执行期间持有；一条 DELETE 删全量会形成长事务，把业务写入堵在行锁上。单表失败只 WARN，不影响其他表当天继续清理。
 - **代价**：固定窗口在边界可能瞬时放行接近两倍配额；清理是"尽力而为"，积压只能靠次日继续消化，需要盯 `isd.retention.deleted` 判断是否该调大批次。
 
+### ADR-20 CSRF：Cookie 双提交，而不是关掉它
+
+- **背景**：Session 方案下浏览器会自动带 Cookie，跨站表单可以直接以用户身份发写请求。早期实现是关闭 CSRF + 依赖 `SameSite=Lax`，但 Lax 只挡住跨站顶层导航，对同站子域与老浏览器不足，且"关掉一个防护"在评审里很难解释。
+- **决策**：`CookieCsrfTokenRepository.withHttpOnlyFalse()` + `SpaCsrfTokenRequestHandler`。token 放 `XSRF-TOKEN` Cookie（故意允许 JS 读取），axios 同源请求自动复制到 `X-XSRF-TOKEN` 头，服务端比对。
+- **两个必须配的细节**：一是 Spring Security 6 默认用 XOR 处理器渲染 token，而 SPA 头里带的是 Cookie 明文，必须"渲染 XOR / 校验明文"分工，否则永远 403；二是用 `CsrfCookieFilter` 在第一个 GET 就 `getToken()` 把 Cookie 下发，否则登录页第一次 POST 必然 403 且前端无从补救。
+- **测试策略**：100 个 `perform(post(...))` 逐个加 `.with(csrf())` 是机械噪声且容易漏，改成 `MockMvcBuilderCustomizer` 统一注入"Cookie + 头成对"的合法 token（等价于浏览器行为）；另用未定制的 MockMvc 验证缺 token、Cookie 与头不一致都必须 403——保证"全绿"是因为校验被满足，而不是被关掉。
+- **代价**：token 不能设 HttpOnly，XSS 一旦成立这层失效；真正的兜底是 CSP 与输出转义（本项目尚未配 CSP，已列入已知限制）。每次写请求多一次 Cookie 读取与常量时间比较，开销可忽略。
+
+### ADR-21 生产形态：Nginx 终止 TLS，应用不暴露端口
+
+- **背景**：`docker-compose.stack.yml` 把 8081 直接映射到宿主机，适合演示，但它绕过了 HTTPS、安全响应头与统一入口，和"生产可用"是两回事。
+- **决策**：新增 `docker-compose.prod.yml`：Nginx 监听 80/443，80 永久 301 到 443；应用只在容器网络内 `expose 8081`，宿主机不再映射。prod profile 打开 `forward-headers-strategy: framework`（靠 `X-Forwarded-Proto` 正确判断 https 与 Secure Cookie）、关闭 Swagger、日志仍走 stdout。
+- **为什么 HSTS 不写在 Nginx**：Spring Security 默认已经输出 `Strict-Transport-Security` / `X-Content-Type-Options` / `X-Frame-Options`，两层都加会在响应里出现重复头（实测确实重复了一组），排障时容易误判；Nginx 只补 `Referrer-Policy`。
+- **缓存边界**：只对 `/assets/`（内容哈希文件名）设 30 天缓存，`/api/` 与 `index.html` 绝不长缓存——否则发版后用户会拿到旧页面却调新接口。
+- **超时**：`proxy_read_timeout 90s`，大于 AI 的 30s 硬超时 + 重试预算；反代超时短于业务超时会把"慢"变成"502"，把可解释的降级变成不可解释的故障。
+- **代价**：自签证书只适合本地演示（浏览器告警）；真实环境需替换为可信证书，并考虑把 8082 管理端口的抓取改成 sidecar 或独立网络。
+
 ---
 
 ## 5. 数据模型
