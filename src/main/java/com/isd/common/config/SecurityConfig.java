@@ -19,15 +19,18 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 
 /**
  * Spring Security 配置（Session 方案）。
  *
  * 三个关键取舍：
- * 1. 关闭 CSRF：本项目的客户端是同源前端 + JSON 接口，Session Cookie 已设 SameSite=Lax，
- *    跨站表单提交不会带上 Cookie；若要更严格，可换成 CookieCsrfTokenRepository 双提交模式。
+ * 1. 开启 CSRF（Cookie 双提交）：Session Cookie 虽已设 SameSite=Lax，但 Lax 只挡住跨站表单的
+ *    顶层导航，挡不住同站子域与老浏览器；用 CookieCsrfTokenRepository 让前端在请求头回传 token，
+ *    才算真正验证"请求来自我们的页面"。细节见 {@link SpaCsrfTokenRequestHandler}。
  * 2. 关闭 formLogin / httpBasic：只保留我们自己的 JSON 登录接口，避免暴露默认登录页与 Basic 认证入口。
  * 3. 401/403 也必须返回统一 JSON 结构，否则前端的 axios 拦截器拿到的是一段 HTML。
  */
@@ -56,11 +59,20 @@ public class SecurityConfig {
                                                    ObjectMapper objectMapper,
                                                    IsdMetrics metrics) throws Exception {
         http
-                .csrf(AbstractHttpConfigurer::disable)
+                /*
+                 * CSRF 用 Cookie 双提交：token 放在可被 JS 读到的 XSRF-TOKEN Cookie 里，
+                 * axios 同源请求会自动带上 X-XSRF-TOKEN 头，服务端比对两者。
+                 * 只读请求（GET/HEAD/OPTIONS）不校验，所以列表页、静态资源都不受影响。
+                 */
+                .csrf(csrf -> csrf
+                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                        .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler()))
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .logout(AbstractHttpConfigurer::disable)
                 .securityContext(context -> context.securityContextRepository(securityContextRepository))
+                // 首个 GET 就要把 XSRF-TOKEN 下发，否则登录页的第一次 POST 无从带 token
+                .addFilterAfter(new CsrfCookieFilter(), BasicAuthenticationFilter.class)
                 /*
                  * 会话存在 Redis（Spring Session），"踢人"= 删除会话记录，而不是给 SessionInformation 打过期标记。
                  * 因此这里不再装配 ConcurrentSessionFilter / SessionRegistry：

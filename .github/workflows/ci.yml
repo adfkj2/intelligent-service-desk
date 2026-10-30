@@ -26,7 +26,7 @@ jobs:
           cache: maven
 
       # runner 自带 Docker，AbstractIntegrationTest 会启动 MySQL 8 与 Redis 7 容器；
-      # verify 同时覆盖编译、96 个用例、覆盖率门禁与打 jar
+      # verify 同时覆盖编译、102 个用例、覆盖率门禁与打 jar
       # 用 wrapper 而不是裸 mvn：Maven 版本由 .mvn/wrapper/maven-wrapper.properties 锁定
       - name: 授权 mvnw
         run: chmod +x mvnw

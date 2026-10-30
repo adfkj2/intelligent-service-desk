@@ -12,6 +12,13 @@ const service = axios.create({
   timeout: 60000,
   // Session 方案：Cookie 即凭证，前后端同源（开发期由 Vite 代理保证）
   withCredentials: true
+  /*
+   * CSRF 走「Cookie 双提交」：后端下发 XSRF-TOKEN（故意不带 HttpOnly），
+   * axios 默认 xsrfCookieName/xsrfHeaderName 正好就是 XSRF-TOKEN / X-XSRF-TOKEN，
+   * 同源请求会自动把 Cookie 值复制到请求头，所以这里不需要任何额外代码。
+   * 唯一不能动的是 withCredentials 与同源部署（Vite 代理 / Nginx 反代）——一旦跨源，
+   * 浏览器既不发 Cookie 也不发头，登录与写操作都会 403。
+   */
 })
 
 service.interceptors.response.use(

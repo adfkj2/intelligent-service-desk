@@ -250,7 +250,7 @@ WHERE id=? AND status='OPEN' AND version=?
 
 ### ADR-14 测试库：容器优先，本机回退
 
-- **背景**：96 个自动化测试全部依赖真实 MySQL（会话外置后还依赖 Redis），要求每台机器都装好 MySQL80 并配好 `application-local.yml`，换机器或进 CI 就跑不起来。
+- **背景**：102 个自动化测试全部依赖真实 MySQL（会话外置后还依赖 Redis），要求每台机器都装好 MySQL80 并配好 `application-local.yml`，换机器或进 CI 就跑不起来。
 - **决策**：`AbstractIntegrationTest` 启动 `mysql:8.0.36` 与 `redis:7.4-alpine` 两个单例容器，用 `@DynamicPropertySource` 覆盖 `spring.datasource.*` 与 `spring.data.redis.*`；探测不到 Docker 时不注册属性，回退本机服务。`ISD_TEST_NO_DOCKER=true` 可强制回退。
 - **为什么容器放静态字段**：Spring 上下文会缓存复用，容器若随测试类停止，下一个复用同一上下文的测试类就连不上库。
 - **代价**：有 Docker 时每个测试 JVM 多 10–20 秒；没有 Docker 时探测会先等几秒再回退。

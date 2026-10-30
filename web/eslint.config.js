@@ -12,8 +12,8 @@ import prettier from 'eslint-config-prettier'
  */
 export default [
   {
-    // 构建产物与依赖不参与检查；static 是 vite 的输出目录，也不该被 lint
-    ignores: ['dist/**', 'node_modules/**', '../src/main/resources/static/**']
+    // 构建产物、依赖、覆盖率报告不参与检查；static 是 vite 的输出目录，也不该被 lint
+    ignores: ['dist/**', 'coverage/**', 'node_modules/**', '../src/main/resources/static/**']
   },
   js.configs.recommended,
   ...pluginVue.configs['flat/recommended'],

@@ -18,7 +18,7 @@
 | AI 助手 | DeepSeek（OpenAI 兼容协议）+ Function Calling，两个只读工具：查当前用户工单、检索知识库；**RAG：先全文召回再拼提示词**；超时/异常自动降级为知识库检索；**每次问答落审计表** |
 | 站内信 | 接单 / 指派 / 状态变更自动通知相关人（**Transactional Outbox**：事件与业务同事务落库，调度器异步投递）；多实例靠 `(event_id, user_id)` 唯一索引幂等、重试有上限转 `FAILED`；未读数、单条/全部已读（越权 404） |
 | 管理台 | Vue 3 + Vite 桌面前端：工作台统计、工单列表/详情/新建、知识库、用户管理、**消息铃铛（未读数 + 下拉列表）**、全局 AI 抽屉；按角色显示菜单，构建产物打进同一个 jar |
-| 工程 | 统一响应与全局异常、参数校验、Springdoc 在线接口文档、Flyway 版本化迁移、Testcontainers 测试库、GitHub Actions、Micrometer 指标与 traceId 日志、**登录失败限流（Redis）**、**AI 配额限流（用户/IP 双维度）**、**数据保留清理（定时分批删除）**、96 个自动化测试（含并发冲突与幂等用例） |
+| 工程 | 统一响应与全局异常、参数校验、Springdoc 在线接口文档、Flyway 版本化迁移、Testcontainers 测试库、GitHub Actions、Micrometer 指标与 traceId 日志、**登录失败限流（Redis）**、**AI 配额限流（用户/IP 双维度）**、**数据保留清理（定时分批删除）**、**CSRF 双提交防护**、102 个自动化测试（含并发冲突与幂等用例） |
 
 ---
 
@@ -39,7 +39,7 @@
 | Redis | 7.4（`docker compose`） | 会话共享存储；本地容器名 `isd-redis` |
 | springdoc-openapi | 2.8.9 | Swagger UI |
 | 前端 | Vue 3.5 + Vite 5 + Element Plus 2.9 + Pinia + Tailwind | 独立 `web/` 工程，`npm run build` 产出到 `src/main/resources/static` |
-| 测试 | JUnit 5 + MockMvc + AssertJ | 96 个用例 |
+| 测试 | JUnit 5 + MockMvc + AssertJ | 102 个用例 |
 
 ---
 
@@ -396,7 +396,7 @@ web/                   前端工程（独立 npm 包，构建产物回灌 src/ma
 ./mvnw verify    # 测试 + 覆盖率报告与门禁（报告在 target/site/jacoco/index.html）
 ```
 
-覆盖率门禁：JaCoCo **行覆盖 ≥ 90%**（实测基线 91.90%，分支 71.76%），不达标 `./mvnw verify` 直接失败，报告随 CI 产物可下载。
+覆盖率门禁：JaCoCo **行覆盖 ≥ 90%**（实测基线 92.17%，分支 71.65%），不达标 `./mvnw verify` 直接失败，报告随 CI 产物可下载。
 
 另有性能验证：k6 脚本压工单读路径与 AI 配额，阈值写死在脚本里（列表 p95 < 300ms、详情 p95 < 200ms、AI 5xx == 0），跑不过即失败。实测数据与瓶颈分析见 [docs/perf-report.md](docs/perf-report.md)。
 
@@ -425,8 +425,9 @@ web/                   前端工程（独立 npm 包，构建产物回灌 src/ma
 | `AiToolsTest` | 4 | 工具只返回本人数据、未登录即失败、状态过滤 |
 | `AiRagTest` | 3 | 召回内容进入提示词、审计字段与真实分支一致、未命中不硬塞上下文 |
 | `SessionRedisTest` | 2 | 会话真的落在 Redis、重置密码删光该账号全部会话、本人改密只保留当前会话 |
+| `CsrfProtectionTest` | 6 | 首个 GET 即下发 `XSRF-TOKEN`、缺 token 403、Cookie 与头不一致 403、只读不受影响、带 token 的注册→登录→建单全链路 |
 
-合计 **96** 个用例。并发用例刻意不加 `@Transactional`——事务是连接级的，两个线程各自提交才能测出真实冲突；指标断言一律用**差值**，因为 Spring 上下文复用、计数器不会在测试之间清零。
+合计 **102** 个用例。并发用例刻意不加 `@Transactional`——事务是连接级的，两个线程各自提交才能测出真实冲突；指标断言一律用**差值**，因为 Spring 上下文复用、计数器不会在测试之间清零。
 
 > `AiRagTest` 也不能加 `@Transactional`：InnoDB 的全文索引在行提交后才进入检索视图，
 > 测试事务里的种子数据永远查不到，会得到"召回永远为空"的假阴性。改为 `itest-` 前缀 + `@AfterEach` 手工清理。
@@ -438,7 +439,7 @@ web/                   前端工程（独立 npm 包，构建产物回灌 src/ma
 
 CI 在 `.github/workflows/ci.yml`，三个 job 都是硬门禁：
 
-- **后端**：`./mvnw verify`（runner 自带 Docker，固定走容器模式），一次覆盖编译、96 个用例、JaCoCo 覆盖率检查与打 jar；失败的 surefire 报告和每次都生成的 `target/site/jacoco/` 都会作为产物上传；
+- **后端**：`./mvnw verify`（runner 自带 Docker，固定走容器模式），一次覆盖编译、102 个用例、JaCoCo 覆盖率检查与打 jar；失败的 surefire 报告和每次都生成的 `target/site/jacoco/` 都会作为产物上传；
 - **前端**：`npm ci` → `npm run lint`（ESLint 9 flat config，未定义变量、`v-for` 缺 `:key` 这类真问题为 error）→ `npm test`（Vitest，25 个单测）→ `npm run build`；
 - **镜像**：`docker build`（不推送），专门拦住「只在本地机器能构建」的退化——缺文件、依赖本机 `static/`、忘写 `.dockerignore` 都会在这一步暴露。
 
@@ -452,7 +453,7 @@ CI 在 `.github/workflows/ci.yml`，三个 job 都是硬门禁：
 - AI 限流是固定窗口：窗口边界可能瞬时放行接近两倍配额（换来实现与排查的简单）；配额按节点共享 Redis，Redis 故障时 AI 接口会随会话一起不可用
 - 登录限流按 IP 20 次的阈值对 NAT 环境偏严，企业出口 IP 集中时要按实际调大或改成网关注入的可信头
 - 幂等键只在"同一用户 + 同一 key"下生效，key 由前端页面生成，没有做服务端过期回收（靠唯一索引长期占用存储可忽略的空间）
-- CSRF 关闭（依赖 SameSite=Lax），生产可换 Cookie 双提交模式
+- CSRF 用 Cookie 双提交（`XSRF-TOKEN` + `X-XSRF-TOKEN`）：token 必须可被 JS 读取（不能设 HttpOnly），因此一旦出现 XSS，CSRF 这层就失效——真正的防线仍是 CSP + 输出转义，本项目暂未配 CSP 响应头
 - 工单号仍是"日期 + 4 位随机数 + 重试"，未换雪花/序列
 - 前端只有 25 个单测（请求拦截器、会话 store、回跳校验、通知铃铛），覆盖的是"跑错会静默出错"的逻辑；页面级 E2E 与视觉回归仍未做，靠手工验收清单兜底
 - Element Plus 全量引入（主包 gzip 约 410KB），内网可接受；按需引入留作优化项
