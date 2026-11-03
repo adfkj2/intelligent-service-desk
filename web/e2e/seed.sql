@@ -6,6 +6,9 @@
 --
 -- 注意：password_hash 是 BCrypt 60 字符（列宽 72），改密码时三处一起换，否则登录会假失败。
 
+-- Minimal MySQL images default the CLI to latin1; stdin is this UTF-8 file.
+SET NAMES utf8mb4;
+
 INSERT INTO sys_user (username, password_hash, full_name, role, status, must_change_password, version)
 VALUES ('demo_emp', '$2a$10$HubxZz4BHgRFfYnuJSmE0OOBPzQkXLSjARyUkZmqw.UcPVBfcVhPG', '演示员工', 'EMPLOYEE', 1, 0, 0),
        ('demo_sup', '$2a$10$XWGBYDz4ojVaH3QjKSWndeMjAYHV6oM1T7IBs7RLIGr7iShvB8kO.', '演示技术支持', 'SUPPORT', 1, 0, 0),

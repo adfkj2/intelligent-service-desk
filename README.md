@@ -482,6 +482,8 @@ cd web && npx playwright install --with-deps chromium && npx playwright test
 
 真实服务测试覆盖登录 → 建单 → 接单 → 解决 → 关闭，以及智能草稿确认、回复／附件、内部隔离、待补充恢复、重开和知识审核发布。另有四条模拟接口浏览器场景验证引用跳转、版本与窄屏布局；失败保留 trace。
 
+`web/e2e/seed.sql` 显式声明 UTF-8，避免容器内默认 latin1 客户端把中文演示数据导入为乱码。
+
 | 测试类 | 用例数 | 覆盖内容 |
 |---|---|---|
 | `TicketApiTest` | 12 | 创建/详情/分页/统计、参数校验、401/404/405/415 |
