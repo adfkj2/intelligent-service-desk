@@ -56,6 +56,39 @@
 
 ## 快速开始
 
+### 推荐：Windows 双击启动
+
+只需要安装并完成 [Docker Desktop](https://www.docker.com/products/docker-desktop/) 的首次设置，使用 Linux 容器模式。无需另外安装 Java、Node.js、Maven、MySQL 或 Redis。
+
+1. 首次体验：在项目文件夹中双击 **`demo.cmd`**。
+2. 等待窗口显示 `Ready`，浏览器会自动打开 [服务台](http://localhost:8081/)。首次需要下载镜像并构建，耗时可能为数分钟；之后会复用缓存。
+3. 使用演示账号登录：管理员 `demo_admin / admin12345`，技术支持 `demo_sup / support123`，员工 `demo_emp / employee123`。
+
+`demo.cmd` 只在数据库没有用户时创建演示账号；已有用户时直接跳过，不修改原账号的密码、角色或启用状态。日常启动双击 **`start.cmd`**；停止双击 **`stop.cmd`**，数据库和附件等数据会保留。关闭启动窗口不会停止后台服务。
+
+启动器会自动检查本机 Docker，必要时后台启动 Docker Desktop，等待数据库、Redis 和应用就绪后再打开页面。快捷方式默认仅允许本机访问。
+
+也可以在项目目录的 PowerShell 中运行：
+
+| 操作 | 命令 |
+|---|---|
+| 首次演示启动 | `.\demo.cmd` |
+| 正常启动，自动构建最新代码 | `.\start.cmd` |
+| 快速启动已有镜像 | `.\start.cmd -NoBuild` |
+| 改用其他端口 | `.\start.cmd -Port 18081` |
+| 启动但不打开浏览器 | `.\start.cmd -NoBrowser` |
+| 查看服务状态 | `.\start.cmd -Action Status` |
+| 查看应用日志，Ctrl+C 退出查看 | `.\start.cmd -Action Logs` |
+| 停止并保留数据 | `.\stop.cmd` |
+
+修改代码后用普通 `start.cmd` 重新构建；`-NoBuild` 适合没有代码变更时快速恢复服务。如果 8081 已被占用，可使用 `demo.cmd -Port 18081`，就绪后自动打开对应地址。
+
+**可选配置**：需要接入 DeepSeek 或固定端口时，将 `.env.example` 复制为项目根目录的 `.env`，填写 `DEEPSEEK_API_KEY`、`ISD_HTTP_PORT` 等配置。不填模型 Key 也能使用工单、知识库和 AI 降级建议。`.env` 已排除在 Git 和镜像构建上下文之外。已有数据库的密码应保持原值，修改 `MYSQL_ROOT_PASSWORD` 不会自动修改数据卷中的数据库密码。
+
+若首次 Docker 设置尚未完成，先打开 Docker Desktop 完成设置再重试；若构建失败，窗口会保留错误信息，可用 `start.cmd -Action Logs` 查看应用日志。以下是手动开发和部署说明，使用上述快捷启动时无需逐步执行。
+
+首次下载 Maven 依赖较慢时，可在 `.env` 中设置 `MAVEN_MIRROR_URL=https://maven.aliyun.com/repository/public` 后重新启动。
+
 ### 1. 环境
 
 - JDK 21

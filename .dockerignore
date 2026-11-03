@@ -21,4 +21,6 @@ web/dist/
 docs/
 
 **/application-local.yml
+.env
+.env.*
 *.log
