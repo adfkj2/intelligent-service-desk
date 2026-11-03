@@ -281,7 +281,7 @@ WHERE id=? AND status='OPEN' AND version=?
 
 **Q53：CI 怎么设计的？**
 一句话：五个并行 job——后端 `./mvnw verify`（runner 自带 Docker，固定走容器模式）、前端 lint/test/audit/build、镜像 `docker build`（不推送）、E2E（Playwright 打 prod 栈）、压测冒烟（k6）。
-展开：`verify` 一次覆盖编译、207 个用例、JaCoCo 行覆盖门禁（≥90%）与打 jar，之后统计 `@Test` 数与 README「关键数字」比对（加用例没同步文档就红），覆盖率与 surefire 报告都作为产物上传、失败时也传——恰恰是失败的时候最需要看哪一行没被覆盖。前端 job 是 `npm ci` → `npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org` → `npm run lint` → `npm test` → `npm run build`：未定义变量这类问题 lint 就拦住，拦截器/store 的逻辑坏了构建照样成功、只有单测能发现；audit 只拦生产依赖，devDeps 的噪音不阻塞发版。镜像 job 专门接住"只在本地能构建"的退化：依赖本机 `static/`、忘写 `.dockerignore`、少 copy 一个文件，本地能过、CI 必红。E2E job 生成自签证书、起 `docker-compose.prod.yml`、灌 `seed.sql`、用 Chromium 跑建单→接单→解决→关闭主流程；压测 job 起 stack 栈，用 `grafana/k6` 跑 5 VU / 5s 冒烟，阈值与完整压测一致。`concurrency` 让同分支的旧流水线自动取消，省 runner 时间。
+展开：`verify` 一次覆盖编译、207 个用例、JaCoCo 行覆盖门禁（≥90%）与打 jar，之后统计 `@Test` 数与 README「关键数字」比对（加用例没同步文档就红），覆盖率与 surefire 报告都作为产物上传、失败时也传——恰恰是失败的时候最需要看哪一行没被覆盖。前端 job 是 `npm ci` → `npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org` → `npm run lint` → `npm test` → `npm run build`：未定义变量这类问题 lint 就拦住，拦截器/store 的逻辑坏了构建照样成功、只有单测能发现；audit 只拦生产依赖，devDeps 的噪音不阻塞发版。镜像 job 专门接住"只在本地能构建"的退化：依赖本机 `static/`、忘写 `.dockerignore`、少 copy 一个文件，本地能过、CI 必红。E2E job 生成自签证书、起 `docker-compose.prod.yml`、灌 `seed.sql`、用 Chromium 跑建单→接单→解决→关闭主流程；压测 job 起 stack 栈，用 `grafana/k6` 跑 5 VU / 20s 冒烟（setup 里先预热，避免冷启动尾巴顶穿 p95），阈值与完整压测一致。`concurrency` 让同分支的旧流水线自动取消，省 runner 时间。
 
 **Q53c：为什么 E2E 一定要打 https 的 prod 栈，不能用 8081 的 stack？**
 一句话：prod profile 的会话 Cookie 带 `Secure`，在 `http://localhost:8081` 下浏览器根本不回传，登录会"假失败"。

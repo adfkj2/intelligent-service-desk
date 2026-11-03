@@ -42,6 +42,15 @@ export function setup() {
     }
   }
   check(ids, { '种子工单可用': (list) => list.length > 0 })
+
+  // 冷启动预热：JVM JIT、Hikari 连接池、MyBatis 语句缓存、Redis 会话都在第一次访问时才真正就绪。
+  // 预热放在 setup 里，被测场景一开始就是热态；否则前一两百毫秒的编译与建连开销会直接落进 p95，
+  // 测出来的是启动耗时而不是接口性能。预热请求统一打 name:warmup，不进被测阈值。
+  for (let i = 0; ids.length > 0 && i < 20; i += 1) {
+    http.get(`${BASE_URL}/api/tickets?page=1&size=10`, { tags: { name: 'warmup' } })
+    http.get(`${BASE_URL}/api/tickets/${ids[i % ids.length]}`, { tags: { name: 'warmup' } })
+  }
+
   return { ids, auth }
 }
 

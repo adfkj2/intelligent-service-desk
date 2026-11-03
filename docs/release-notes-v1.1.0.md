@@ -39,7 +39,7 @@ sha256sum -c SHA256SUMS.txt
 | 依赖 | `npm audit --omit=dev --audit-level=high` | 生产依赖无 high/critical |
 | 镜像 | `docker build -t isd:local .` | 三阶段构建成功，非 root 运行 |
 | 浏览器 E2E | `npx playwright test`（prod 栈） | 10 条通过；主流程含建单→接单→解决→关闭；CSP 违规 0 |
-| 性能 | k6 冒烟（5 VU / 5s） | 工单读路径与 AI 配额通过，阈值未放宽 |
+| 性能 | k6 冒烟（5 VU / 20s，setup 预热） | 工单读路径与 AI 配额通过，阈值未放宽 |
 | 安全 | `curl -k -D - https://localhost/api/ping` | CSP / HSTS / Secure Cookie / CSRF 缺失 403 |
 | 数字一致 | CI `@Test` 守卫 | 207 用例 / 69 接口 / 13 迁移 / 24 表 |
 

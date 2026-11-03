@@ -233,13 +233,14 @@ jobs:
           # 201 = 首次创建；409 = 账号已存在（重跑），都算准备就绪
           test "$code" = "201" || test "$code" = "409"
 
-      # 只调 VUS/DURATION/SEED_TICKETS 缩短时间，阈值不许放宽
+      # 只调 VUS/DURATION/SEED_TICKETS 缩短时间，阈值不许放宽；
+      # 20s 是让 runner 上的抖动被样本摊薄，5s 的窗口里前十几次请求就能把 p95 顶穿。
       - name: k6 工单读路径
         run: |
           docker run --rm --add-host=host.docker.internal:host-gateway \
             -v "$PWD/perf/k6:/scripts:ro" \
             -e BASE_URL=http://host.docker.internal:8081 \
-            -e VUS=5 -e DURATION=5s -e SEED_TICKETS=200 \
+            -e VUS=5 -e DURATION=20s -e SEED_TICKETS=200 \
             grafana/k6:0.54.0 run /scripts/tickets.js
 
       - name: k6 AI 降级与配额

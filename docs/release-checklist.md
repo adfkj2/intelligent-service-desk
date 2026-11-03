@@ -134,7 +134,7 @@ docker compose -f docker-compose.stack.yml up -d --build
 # 注册 perf_emp（带 CSRF 头）见 .github/workflows/ci.yml 的 perf job
 docker run --rm --add-host=host.docker.internal:host-gateway \
   -v "$PWD/perf/k6:/scripts:ro" \
-  -e BASE_URL=http://host.docker.internal:8081 -e VUS=5 -e DURATION=5s \
+  -e BASE_URL=http://host.docker.internal:8081 -e VUS=5 -e DURATION=20s \
   grafana/k6:0.54.0 run /scripts/tickets.js
 ```
 
