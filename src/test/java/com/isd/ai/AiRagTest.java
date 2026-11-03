@@ -3,6 +3,7 @@ package com.isd.ai;
 import java.util.List;
 
 import com.isd.ai.client.LlmClient;
+import com.isd.ai.client.LlmResult;
 import com.isd.ai.tools.ToolCallContext;
 import com.isd.ai.tools.KnowledgeTools;
 import com.isd.common.time.BusinessTime;
@@ -27,6 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
@@ -97,10 +99,10 @@ class AiRagTest extends AbstractIntegrationTest {
     @DisplayName("召回命中：知识正文进入提示词，回答带来源标题，审计记录 kb_hits/tool_calls")
     void ragInjectsKnowledgeAndWritesAudit() throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        when(llmClient.chat(promptCaptor.capture())).thenAnswer(invocation -> {
+        when(llmClient.chat(promptCaptor.capture(), any())).thenAnswer(invocation -> {
             // 模拟模型发起一次工具调用：计数发生在 aiExecutor 线程上，正是 ToolCallContext 要覆盖的场景
             ToolCallContext.increment();
-            return "先检查电源与网线，再重启打印服务。";
+            return LlmResult.text("先检查电源与网线，再重启打印服务。");
         });
 
         mockMvc.perform(post("/api/ai/chat").with(user(EMPLOYEE))
@@ -134,7 +136,7 @@ class AiRagTest extends AbstractIntegrationTest {
     @Test
     @DisplayName("模型失败：降级答案用召回结果，审计标记 success=0 且 source=FALLBACK")
     void fallbackStillUsesRetrievedKnowledge() throws Exception {
-        when(llmClient.chat(anyString())).thenThrow(new IllegalStateException("upstream 502"));
+        when(llmClient.chat(anyString(), any())).thenThrow(new IllegalStateException("upstream 502"));
 
         mockMvc.perform(post("/api/ai/chat").with(user(EMPLOYEE))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -156,7 +158,7 @@ class AiRagTest extends AbstractIntegrationTest {
     @DisplayName("召回没命中：提示词就是用户原话，审计 kb_hits=0，miss 指标 +1")
     void retrievalMissKeepsPromptClean() throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        when(llmClient.chat(promptCaptor.capture())).thenReturn("这个问题我需要更多信息。");
+        when(llmClient.chat(promptCaptor.capture(), any())).thenReturn(LlmResult.text("这个问题我需要更多信息。"));
         double missBefore = retrievalCount("miss");
 
         mockMvc.perform(post("/api/ai/chat").with(user(EMPLOYEE))
@@ -177,7 +179,7 @@ class AiRagTest extends AbstractIntegrationTest {
     void toolDiscoveredSourcesRemainTraceable() throws Exception {
         jdbcTemplate.update("UPDATE kb_item SET environment=?,review_due_at=? WHERE title=?",
                 "Windows 11，企业打印驱动v3", BusinessTime.now().minusDays(1), KB_TITLE);
-        when(llmClient.chat(anyString())).thenAnswer(invocation -> {
+        when(llmClient.chat(anyString(), any())).thenAnswer(invocation -> {
             assertThat(knowledgeTools.searchKnowledgeBase("打印机"))
                     .anySatisfy(item -> {
                         assertThat(item.excerpt()).contains("检查电源与网线");
@@ -185,7 +187,7 @@ class AiRagTest extends AbstractIntegrationTest {
                         assertThat(item.reviewRequired()).isTrue();
                         assertThat(item.reviewDueAt()).isBefore(BusinessTime.now());
                     });
-            return "请参考打印机离线处理步骤核对电源与网线。";
+            return LlmResult.text("请参考打印机离线处理步骤核对电源与网线。");
         });
         mockMvc.perform(post("/api/ai/chat").with(user(EMPLOYEE))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -204,7 +206,7 @@ class AiRagTest extends AbstractIntegrationTest {
     @DisplayName("知识适用环境与复核期限进入提示词和引用，过期只提醒核实而不屏蔽资料")
     void reviewMetadataTravelsWithRetrievedKnowledge() throws Exception {
         ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
-        when(llmClient.chat(prompt.capture())).thenReturn("该知识需要复核，请先核实当前环境与步骤仍适用。");
+        when(llmClient.chat(prompt.capture(), any())).thenReturn(LlmResult.text("该知识需要复核，请先核实当前环境与步骤仍适用。"));
         jdbcTemplate.update("UPDATE kb_item SET environment=?,review_due_at=? WHERE title=?",
                 "Windows 11，企业打印驱动v3", BusinessTime.now().minusDays(1), KB_TITLE);
         mockMvc.perform(post("/api/ai/chat").with(user(EMPLOYEE)).contentType(MediaType.APPLICATION_JSON)

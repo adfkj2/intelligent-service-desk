@@ -113,7 +113,7 @@ public class SecurityConfig {
                          */
                         .requestMatchers("/", "/index.html", "/favicon.ico", "/assets/**",
                                 "/login", "/change-password", "/tickets", "/tickets/**", "/kb",
-                                "/admin/users").permitAll()
+                                "/admin/users", "/admin/ai").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .exceptionHandling(handling -> handling

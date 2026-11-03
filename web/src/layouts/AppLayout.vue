@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { BookOpen, ClipboardList, LayoutDashboard, LogOut, Sparkles, User, Users } from 'lucide-vue-next'
+import { BookOpen, ClipboardList, LayoutDashboard, LogOut, Settings2, Sparkles, User, Users } from 'lucide-vue-next'
 import { useUserStore } from '../stores/user'
 import { ROLE_LABEL, ROLE_TAG_TYPE } from '../constants/ticket'
 import AiDrawer from '../components/AiDrawer.vue'
@@ -26,6 +26,7 @@ const menus = computed(() => {
   ]
   if (store.isAdmin) {
     items.push({ name: 'admin-users', label: '用户管理', icon: Users })
+    items.push({ name: 'admin-ai', label: 'AI 配置与用量', icon: Settings2 })
   }
   return items
 })

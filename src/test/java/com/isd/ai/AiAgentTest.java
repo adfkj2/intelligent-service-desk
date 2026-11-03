@@ -1,6 +1,7 @@
 package com.isd.ai;
 
 import com.isd.ai.client.LlmClient;
+import com.isd.ai.client.LlmResult;
 import com.isd.auth.security.LoginUser;
 import com.isd.support.AbstractIntegrationTest;
 import com.isd.support.TestUsers;
@@ -18,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
@@ -51,7 +53,7 @@ class AiAgentTest extends AbstractIntegrationTest {
     @Test
     @DisplayName("模型正常返回：source=LLM，原文透传，指标记 success")
     void chatReturnsLlmAnswer() throws Exception {
-        when(llmClient.chat(anyString())).thenReturn("你有 1 个工单处于处理中，处理人是技术支持。");
+        when(llmClient.chat(anyString(), any())).thenReturn(LlmResult.text("你有 1 个工单处于处理中，处理人是技术支持。"));
         double successBefore = aiChatCount("success");
 
         mockMvc.perform(post("/api/ai/chat").with(user(EMPLOYEE))
@@ -70,7 +72,7 @@ class AiAgentTest extends AbstractIntegrationTest {
     @Test
     @DisplayName("模型异常：仍然 200，source=FALLBACK，业务不被 AI 拖垮")
     void llmFailureFallsBack() throws Exception {
-        when(llmClient.chat(anyString())).thenThrow(new IllegalStateException("upstream 502"));
+        when(llmClient.chat(anyString(), any())).thenThrow(new IllegalStateException("upstream 502"));
 
         mockMvc.perform(post("/api/ai/chat").with(user(EMPLOYEE))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -85,7 +87,7 @@ class AiAgentTest extends AbstractIntegrationTest {
     @Test
     @DisplayName("模型返回空串：也走降级，不把空回答丢给用户")
     void emptyAnswerFallsBack() throws Exception {
-        when(llmClient.chat(anyString())).thenReturn("   ");
+        when(llmClient.chat(anyString(), any())).thenReturn(LlmResult.text("   "));
 
         mockMvc.perform(post("/api/ai/chat").with(user(EMPLOYEE))
                         .contentType(MediaType.APPLICATION_JSON)

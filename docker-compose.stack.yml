@@ -67,6 +67,11 @@ services:
       REDIS_HOST: redis
       # 不配真实 Key 也能启动：AgentService 识别占位符后直接走知识库降级
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-local-placeholder}
+      ISD_AI_MASTER_KEY: ${ISD_AI_MASTER_KEY:-}
+      ISD_AI_MASTER_KEY_FILE: /var/lib/isd/ai/master.key
+      ISD_AI_ALLOWED_ORIGINS: ${ISD_AI_ALLOWED_ORIGINS:-}
+    volumes:
+      - isd-ai-secrets:/var/lib/isd/ai
     ports:
       - "${ISD_BIND_ADDRESS:-0.0.0.0}:${ISD_HTTP_PORT:-8081}:8081"
     restart: unless-stopped
@@ -74,3 +79,4 @@ services:
 volumes:
   isd-mysql-data:
   isd-stack-redis-data:
+  isd-ai-secrets:

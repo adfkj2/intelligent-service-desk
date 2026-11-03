@@ -80,7 +80,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({MethodArgumentTypeMismatchException.class, HttpMessageNotReadableException.class})
     public ResponseEntity<ApiResponse<Void>> handleBadRequest(Exception ex) {
         ErrorCode code = ErrorCode.INVALID_PARAM;
-        log.warn("请求格式错误: {}", ex.getMessage());
+        // Parser messages may include fragments of a credential-bearing request body.
+        log.warn("请求格式错误: {}", ex.getClass().getSimpleName());
         return ResponseEntity.status(code.httpStatus())
                 .body(ApiResponse.error(code.code(), "请求格式错误，请检查参数类型与 JSON 结构"));
     }
@@ -141,8 +142,12 @@ public class GlobalExceptionHandler {
 
     /** 兜底：任何未预期异常都不把堆栈返回给调用方，只在服务端日志留完整信息 */
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiResponse<Void>> handleUnexpected(Exception ex) {
-        log.error("未预期异常", ex);
+    public ResponseEntity<ApiResponse<Void>> handleUnexpected(Exception ex, HttpServletRequest request) {
+        if (request.getRequestURI().startsWith("/api/admin/ai")) {
+            log.error("AI 管理请求发生未预期异常: {}", ex.getClass().getSimpleName());
+        } else {
+            log.error("未预期异常", ex);
+        }
         ErrorCode code = ErrorCode.INTERNAL_ERROR;
         return ResponseEntity.status(code.httpStatus())
                 .body(ApiResponse.error(code.code(), code.defaultMessage()));

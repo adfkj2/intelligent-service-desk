@@ -5,6 +5,7 @@ import java.util.List;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.isd.ai.client.LlmClient;
+import com.isd.ai.client.LlmResult;
 import com.isd.ai.dto.ChatAnswerResponse;
 import com.isd.ai.entity.AiConversation;
 import com.isd.ai.service.AiConversationStore;
@@ -29,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
@@ -58,7 +60,7 @@ class AiWorkspaceApiTest extends AbstractIntegrationTest {
     @Test
     void followsUpWithOwnedHistoryAndKeepsTicketsUnchanged() throws Exception {
         ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
-        when(llm.chat(prompt.capture())).thenReturn("请记录 VPN 错误码。");
+        when(llm.chat(prompt.capture(), any())).thenReturn(LlmResult.text("请记录 VPN 错误码。"));
         long before = jdbc.queryForObject("SELECT COUNT(*) FROM ticket", Long.class);
         JsonNode first = data(send("/api/ai/chat", EMPLOYEE, "{\"question\":\"VPN 连不上\"}"));
         String id = first.path("conversationId").asText();
@@ -84,7 +86,7 @@ class AiWorkspaceApiTest extends AbstractIntegrationTest {
         jdbc.update("INSERT INTO ticket_reply(ticket_id,author_id,content,visibility) VALUES(?,?,?,?)", ticketId, SUPPORT.getId(), "请提供错误619的发生时间", "PUBLIC");
         jdbc.update("INSERT INTO ticket_reply(ticket_id,author_id,content,visibility) VALUES(?,?,?,?)", ticketId, SUPPORT.getId(), "内部备注秘密工号 secret-9811", "INTERNAL");
         ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
-        when(llm.chat(prompt.capture())).thenReturn("请补充错误提示。");
+        when(llm.chat(prompt.capture(), any())).thenReturn(LlmResult.text("请补充错误提示。"));
         JsonNode first = data(send("/api/ai/chat", EMPLOYEE, "{\"question\":\"分析这张单\",\"ticketId\":" + ticketId + "}"));
         assertThat(prompt.getValue()).contains("VPN断线", "请提供错误619的发生时间").doesNotContain("secret-9811");
         String id = first.path("conversationId").asText();
@@ -105,17 +107,17 @@ class AiWorkspaceApiTest extends AbstractIntegrationTest {
 
     @Test
     void draftAsksForMissingFactsAcceptsFollowupAndDoesNotSubmit() throws Exception {
-        when(llm.chat(anyString())).thenReturn("""
+        when(llm.chat(anyString(), any())).thenReturn(LlmResult.text("""
                 ```json
                 {"title":"VPN无法连接","description":"VPN连不上","category":"IT_FAULT","priority":"MEDIUM","missingInformation":[],"steps":["确认网络连接并记录错误提示"]}
                 ```
-                """);
+                """));
         long before = jdbc.queryForObject("SELECT COUNT(*) FROM ticket", Long.class);
         JsonNode draft = data(send("/api/ai/draft", EMPLOYEE, "{\"description\":\"VPN 连不上\"}"));
         assertThat(draft.path("source").asText()).isEqualTo("LLM");
         assertThat(draft.path("missingInformation").size()).isEqualTo(4);
         String conversationId = draft.path("conversationId").asText();
-        when(llm.chat(anyString())).thenReturn("invalid json");
+        when(llm.chat(anyString(), any())).thenReturn(LlmResult.text("invalid json"));
         JsonNode followup = data(send("/api/ai/draft", EMPLOYEE,
                 "{\"description\":\"今天上午9点开始，影响3人，显示错误619，重启无效\",\"conversationId\":\"" + conversationId + "\"}"));
         assertThat(followup.path("source").asText()).isEqualTo("FALLBACK");
@@ -131,7 +133,7 @@ class AiWorkspaceApiTest extends AbstractIntegrationTest {
         for (String invalid : List.of("{}", "[]", "null", "```invalid```",
                 "{\"title\":\"x\",\"description\":\"x\",\"category\":\"INVALID\",\"priority\":\"MEDIUM\",\"missingInformation\":[],\"steps\":[]}",
                 "{\"title\":\"x\",\"description\":\"x\",\"category\":\"IT_FAULT\",\"priority\":\"MEDIUM\",\"missingInformation\":[42],\"steps\":[]}")) {
-            when(llm.chat(anyString())).thenReturn(invalid);
+            when(llm.chat(anyString(), any())).thenReturn(LlmResult.text(invalid));
             send("/api/ai/draft", EMPLOYEE, "{\"description\":\"打印机离线\"}")
                     .andExpect(status().isOk()).andExpect(jsonPath("$.data.source").value("FALLBACK"))
                     .andExpect(jsonPath("$.data.category").value("DEVICE"));
@@ -143,7 +145,7 @@ class AiWorkspaceApiTest extends AbstractIntegrationTest {
 
     @Test
     void modelFailureStillProducesUsefulEditablePermissionDraft() throws Exception {
-        when(llm.chat(anyString())).thenThrow(new IllegalStateException("upstream unavailable"));
+        when(llm.chat(anyString(), any())).thenThrow(new IllegalStateException("upstream unavailable"));
         send("/api/ai/draft", EMPLOYEE, "{\"description\":\"申请财务系统查看权限\"}")
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.source").value("FALLBACK"))
                 .andExpect(jsonPath("$.data.category").value("PERMISSION"))
@@ -152,7 +154,7 @@ class AiWorkspaceApiTest extends AbstractIntegrationTest {
 
     @Test
     void longDraftFactsKeepAuditableAnswerAndAllowFeedback() throws Exception {
-        when(llm.chat(anyString())).thenReturn("not-json");
+        when(llm.chat(anyString(), any())).thenReturn(LlmResult.text("not-json"));
         JsonNode draft = data(send("/api/ai/draft", EMPLOYEE,
                 json.writeValueAsString(java.util.Map.of("description", "VPN无法连接。".repeat(100)))));
         long answerId = draft.path("answerId").asLong();
@@ -163,7 +165,7 @@ class AiWorkspaceApiTest extends AbstractIntegrationTest {
 
     @Test
     void feedbackIsOwnedIdempotentAndAdoptionDoesNotOverwriteRating() throws Exception {
-        when(llm.chat(anyString())).thenReturn("请检查网络。");
+        when(llm.chat(anyString(), any())).thenReturn(LlmResult.text("请检查网络。"));
         long id = data(send("/api/ai/chat", EMPLOYEE, "{\"question\":\"VPN连不上\"}")).path("answerId").asLong();
         send("/api/ai/answers/" + id + "/feedback", EMPLOYEE, "{\"helpful\":true,\"resolved\":false}").andExpect(status().isOk());
         send("/api/ai/answers/" + id + "/feedback", EMPLOYEE, "{\"adopted\":true}").andExpect(status().isOk());
@@ -182,7 +184,7 @@ class AiWorkspaceApiTest extends AbstractIntegrationTest {
 
     @Test
     void roleChangesInvalidatePreviouslyBroaderConversationHistory() throws Exception {
-        when(llm.chat(anyString())).thenReturn("公司有多个工单等待处理。");
+        when(llm.chat(anyString(), any())).thenReturn(LlmResult.text("公司有多个工单等待处理。"));
         String id = data(send("/api/ai/chat", SUPPORT, "{\"question\":\"有哪些工单\"}")).path("conversationId").asText();
         LoginUser demoted = TestUsers.employee(SUPPORT.getId());
         mvc.perform(get("/api/ai/conversations/{id}", id).with(user(demoted))).andExpect(status().isNotFound());
@@ -193,7 +195,7 @@ class AiWorkspaceApiTest extends AbstractIntegrationTest {
     @Test
     void suggestionAndHelpfulDenominatorsExcludePlainChatAndUnratedAdoptions() throws Exception {
         JsonNode before = metricData();
-        when(llm.chat(anyString())).thenReturn("not-json");
+        when(llm.chat(anyString(), any())).thenReturn(LlmResult.text("not-json"));
         long chatId = data(send("/api/ai/chat", EMPLOYEE, "{\"question\":\"VPN怎么检查\"}")).path("answerId").asLong();
         long draftId = data(send("/api/ai/draft", EMPLOYEE, "{\"description\":\"VPN连不上\"}")).path("answerId").asLong();
         long ticketId = createTicket(EMPLOYEE, "VPN无法连接");
@@ -224,7 +226,7 @@ class AiWorkspaceApiTest extends AbstractIntegrationTest {
 
     @Test
     void historyIsBoundedAndConcurrentAppendCannotInterleaveTurns() throws Exception {
-        when(llm.chat(anyString())).thenReturn("建议记录错误码。");
+        when(llm.chat(anyString(), any())).thenReturn(LlmResult.text("建议记录错误码。"));
         String id = data(send("/api/ai/chat", EMPLOYEE, "{\"question\":\"第0轮VPN问题\"}")).path("conversationId").asText();
         for (int turn = 1; turn <= 6; turn++) {
             send("/api/ai/chat", EMPLOYEE, "{\"question\":\"第" + turn + "轮继续\",\"conversationId\":\"" + id + "\"}")
@@ -250,16 +252,16 @@ class AiWorkspaceApiTest extends AbstractIntegrationTest {
         mvc.perform(patch("/api/tickets/{id}/status", similar).with(user(SUPPORT)).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"action\":\"RESOLVE\",\"comment\":\"已更新VPN客户端配置\"}")).andExpect(status().isOk());
         ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
-        when(llm.chat(prompt.capture())).thenReturn("""
+        when(llm.chat(prompt.capture(), any())).thenReturn(LlmResult.text("""
                 {"summary":"员工报告VPN连接失败，原因待确认","steps":["核对错误码与客户端配置"],"replyDraft":"请补充客户端错误提示，便于继续排查。"}
-                """);
+                """));
         send("/api/ai/tickets/" + current + "/assist", EMPLOYEE, "{}").andExpect(status().isForbidden());
         send("/api/ai/tickets/" + current + "/assist", SUPPORT, "{}")
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.source").value("LLM"))
                 .andExpect(jsonPath("$.data.similarTickets[0].id").value(similar));
         assertThat(prompt.getValue()).contains("已更新VPN客户端配置", "原因", "只输出 JSON");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ticket_reply WHERE ticket_id=?", Long.class, current)).isZero();
-        when(llm.chat(anyString())).thenReturn("not-json");
+        when(llm.chat(anyString(), any())).thenReturn(LlmResult.text("not-json"));
         send("/api/ai/tickets/" + current + "/assist", SUPPORT, "{}")
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.source").value("FALLBACK"));
     }

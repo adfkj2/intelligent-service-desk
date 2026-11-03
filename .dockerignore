@@ -23,4 +23,5 @@ docs/
 **/application-local.yml
 .env
 .env.*
+.local/
 *.log

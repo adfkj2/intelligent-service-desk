@@ -91,7 +91,7 @@ public class KnowledgeWorkflowService {
         ChatAnswerResponse answer = agent.chatWithContext(
                 "请将授权资料整理为可供审核的知识草稿，只返回 JSON：{\"title\":\"标题\",\"content\":\"正文\",\"tags\":\"逗号分隔标签\"}。"
                 + "标题最多128字，正文最多20000字，标签最多255字。不要包含工单号、姓名、联系方式、账号、IP或其他个人信息。"
-                + "只归纳已有处理事实；缺少的验证方法和环境明确写待审核，不能编造已经成功的步骤。", context, ticket.title());
+                + "只归纳已有处理事实；缺少的验证方法和环境明确写待审核，不能编造已经成功的步骤。", context, ticket.title(), "KNOWLEDGE_DRAFT");
         if ("LLM".equals(answer.source())) {
             try {
                 String raw = answer.answer().trim().replaceFirst("^```(?:json)?\\s*", "").replaceFirst("\\s*```$", "");
@@ -109,6 +109,7 @@ public class KnowledgeWorkflowService {
                 // Invalid model JSON leaves the factual, reviewable fallback draft intact.
             }
         }
+        if ("LLM".equals(answer.source()) && "FALLBACK".equals(source)) agent.markInvalidOutput(answer);
         String finalTitle = title;
         String finalContent = content;
         String finalTags = tags;

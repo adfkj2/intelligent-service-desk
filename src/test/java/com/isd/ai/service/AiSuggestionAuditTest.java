@@ -62,7 +62,7 @@ class AiSuggestionAuditTest {
         AiConversation conversation = new AiConversation("local-test", 9821L, null, "DRAFT", "EMPLOYEE", 0);
         when(store.prepare(null, 9821L, null, "DRAFT", "EMPLOYEE")).thenReturn(conversation);
         when(store.messages("local-test")).thenReturn(List.of());
-        when(agent.chatWithContext(anyString(), anyString(), anyString()))
+        when(agent.chatWithContext(anyString(), anyString(), anyString(), anyString()))
                 .thenReturn(new ChatAnswerResponse("模型暂不可用", "FALLBACK", List.of(), null, answerId, List.of()));
         return new Fixture(new AiWorkspaceService(agent, store, mapper, mock(TicketService.class), user, new ObjectMapper()), store, mapper);
     }

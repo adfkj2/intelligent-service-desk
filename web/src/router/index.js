@@ -55,6 +55,12 @@ const routes = [
         name: 'admin-users',
         component: () => import('../views/AdminUsersView.vue'),
         meta: { title: '用户管理', roles: ['ADMIN'] }
+      },
+      {
+        path: 'admin/ai',
+        name: 'admin-ai',
+        component: () => import('../views/AdminAiView.vue'),
+        meta: { title: 'AI 配置与用量', roles: ['ADMIN'] }
       }
     ]
   },

@@ -1,9 +1,17 @@
-# REST 接口快照（共 55 个 /api 接口）
+# REST 接口快照（共 69 个 /api 接口）
 #
 # 由 ApiInventoryTest 守护：接口增删后这里必须同步，否则 CI 红。
 # 格式：METHOD /path，按字典序排列；# 开头为注释，读取时忽略。
 # 只统计 /api 开头的路由，SpaForwardController 的页面转发不计入。
 DELETE /api/kb/items/{id}
+GET /api/admin/ai/configurations
+GET /api/admin/ai/configurations/{id}/balance
+GET /api/admin/ai/configurations/{id}/versions
+GET /api/admin/ai/runtime
+GET /api/admin/ai/usage/calls
+GET /api/admin/ai/usage/daily
+GET /api/admin/ai/usage/summary
+GET /api/admin/ai/usage/users
 GET /api/admin/users
 GET /api/ai/conversations/{id}
 GET /api/ai/metrics
@@ -33,6 +41,10 @@ PATCH /api/admin/users/{id}/status
 PATCH /api/kb/drafts/{id}
 PATCH /api/notifications/{id}/read
 PATCH /api/tickets/{id}/status
+POST /api/admin/ai/configurations
+POST /api/admin/ai/configurations/{id}/archive
+POST /api/admin/ai/configurations/{id}/balance/refresh
+POST /api/admin/ai/configurations/{id}/test
 POST /api/admin/users/{id}/password/reset
 POST /api/ai/answers/{id}/feedback
 POST /api/ai/chat
@@ -55,6 +67,8 @@ POST /api/tickets/{id}/attachments
 POST /api/tickets/{id}/claim
 POST /api/tickets/{id}/replies
 POST /api/tickets/{id}/transfer
+PUT /api/admin/ai/configurations/{id}
+PUT /api/admin/ai/runtime
 PUT /api/auth/me/contact
 PUT /api/kb/items/{id}
 PUT /api/tickets/support-profile

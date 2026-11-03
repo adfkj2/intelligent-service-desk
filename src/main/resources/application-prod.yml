@@ -20,6 +20,9 @@ springdoc:
     enabled: false
 
 isd:
+  ai:
+    credentials:
+      allow-local-generation: false
   security:
     csp:
       # 生产下发 CSP（策略见 CspPolicy）；开发期关闭，否则 Vite HMR 与 Swagger UI 会全量报违规

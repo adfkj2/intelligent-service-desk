@@ -2,11 +2,8 @@ package com.isd.common.config;
 
 import java.util.concurrent.ThreadPoolExecutor;
 
-import com.isd.ai.tools.KnowledgeTools;
-import com.isd.ai.tools.TicketTools;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.jvm.ExecutorServiceMetrics;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
@@ -22,7 +19,7 @@ public class AiConfig {
      * 明确告诉模型不能编造、不能执行写操作、查不到就如实说。
      * 第二道约束在代码里：工具本身就只有查询能力，模型想写也没有对应工具可调。
      */
-    private static final String SYSTEM_PROMPT = """
+    public static final String SYSTEM_PROMPT = """
             你是企业 IT 服务台的智能助手，服务对象是公司员工、技术支持和管理员。
             必须遵守以下规则：
             1. 只能依据本次授权上下文、用户提供的描述和工具返回的真实数据回答，绝对不要编造工单号、工单状态、处理人或知识条目。
@@ -60,13 +57,4 @@ public class AiConfig {
         return executor;
     }
 
-    @Bean
-    public ChatClient chatClient(ChatClient.Builder builder,
-                                 TicketTools ticketTools,
-                                 KnowledgeTools knowledgeTools) {
-        return builder
-                .defaultSystem(SYSTEM_PROMPT)
-                .defaultTools(ticketTools, knowledgeTools)
-                .build();
-    }
 }

@@ -1,5 +1,7 @@
 package com.isd.ai.client;
 
+import com.isd.ai.admin.AiRuntimeSnapshot;
+
 /**
  * LLM 调用的抽象（端口）。
  *
@@ -15,5 +17,5 @@ public interface LlmClient {
      *
      * @param question 用户问题（工具调用由 ChatClient 内部完成，这里不感知）
      */
-    String chat(String question);
+    LlmResult chat(String question, AiRuntimeSnapshot snapshot);
 }

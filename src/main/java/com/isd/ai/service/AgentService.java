@@ -14,6 +14,10 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.isd.ai.client.LlmClient;
+import com.isd.ai.admin.AiConfigurationService;
+import com.isd.ai.admin.AiRuntimeSnapshot;
+import com.isd.ai.usage.AiUsageService;
+import com.isd.ai.usage.UsageInvocation;
 import com.isd.ai.dto.ChatAnswerResponse;
 import com.isd.ai.dto.KnowledgeReference;
 import com.isd.ai.entity.AiChatLog;
@@ -46,7 +50,6 @@ public class AgentService {
 
     private static final Logger log = LoggerFactory.getLogger(AgentService.class);
 
-    private static final String PLACEHOLDER_KEY = "local-placeholder";
     /** 注入上下文的条目数：太多会稀释提示词，也会让模型在无关条目上跑偏 */
     private static final int CONTEXT_LIMIT = 3;
     /** 单条知识正文截断：一条 5KB 的条目就能吃掉上下文窗口的大半 */
@@ -60,7 +63,8 @@ public class AgentService {
     private final Executor aiExecutor;
     private final IsdMetrics metrics;
     private final long timeoutSeconds;
-    private final String apiKey;
+    private final AiConfigurationService configurations;
+    private final AiUsageService usage;
 
     public AgentService(LlmClient llmClient,
                         KbService kbService,
@@ -69,7 +73,7 @@ public class AgentService {
                         @Qualifier("aiExecutor") Executor aiExecutor,
                         IsdMetrics metrics,
                         @Value("${isd.ai.timeout-seconds:30}") long timeoutSeconds,
-                        @Value("${spring.ai.openai.api-key:}") String apiKey) {
+                        AiConfigurationService configurations, AiUsageService usage) {
         this.llmClient = llmClient;
         this.kbService = kbService;
         this.auditService = auditService;
@@ -77,7 +81,8 @@ public class AgentService {
         this.aiExecutor = aiExecutor;
         this.metrics = metrics;
         this.timeoutSeconds = timeoutSeconds;
-        this.apiKey = apiKey;
+        this.configurations = configurations;
+        this.usage = usage;
     }
 
     public ChatAnswerResponse chat(String question) {
@@ -86,6 +91,10 @@ public class AgentService {
 
     /** Caller supplies only data this user is authorized to read; the model has no write tools. */
     public ChatAnswerResponse chatWithContext(String question, String context, String retrievalQuery) {
+        return chatWithContext(question, context, retrievalQuery, "CHAT");
+    }
+
+    public ChatAnswerResponse chatWithContext(String question, String context, String retrievalQuery, String purpose) {
         // 计时覆盖检索 + 模型 + 降级：用户感知的是端到端时间，不只是模型那一跳
         long startNanos = System.nanoTime();
 
@@ -95,22 +104,27 @@ public class AgentService {
                         item.getEnvironment(), item.getReviewDueAt()))
                 .toList();
 
-        if (!isConfigured()) {
-            return finish(IsdMetrics.AI_NOT_CONFIGURED, startNanos,
-                    fallback(hits, "AI 未配置 API Key，当前处于降级模式"),
-                    question, hits, references, 0, false);
-        }
-
         String prompt = buildPrompt(question, hits, references, context);
         AtomicInteger toolCalls = new AtomicInteger();
         Map<Long, KnowledgeReference> toolReferences = new ConcurrentHashMap<>();
+        UsageInvocation invocation = null;
         try {
+            var configured = configurations.resolve();
+            if (configured.isEmpty()) {
+                return finish(IsdMetrics.AI_NOT_CONFIGURED, startNanos,
+                        fallback(hits, "AI 未配置 API Key 或已停用，当前处于降级模式"),
+                        question, hits, references, 0, false);
+            }
+            AiRuntimeSnapshot snapshot = configured.get();
+            invocation = usage.begin(snapshot, currentUserId(), purpose);
+            UsageInvocation pinned = invocation;
             // 放到独立线程池执行，主线程只等 timeoutSeconds 秒；超时后任务继续跑完但结果被丢弃
             String answer = CompletableFuture
-                    .supplyAsync(() -> invokeLlm(prompt, toolCalls, toolReferences), aiExecutor)
+                    .supplyAsync(() -> pinned.run(() -> invokeLlm(prompt, snapshot, toolCalls, toolReferences)), aiExecutor)
                     .get(timeoutSeconds, TimeUnit.SECONDS);
 
             if (answer == null || answer.isBlank()) {
+                invocation.businessOutcome("FALLBACK");
                 return finish(IsdMetrics.AI_EMPTY, startNanos,
                         fallback(hits, "AI 没有返回内容"), question, hits, references, toolCalls.get(), false);
             }
@@ -120,22 +134,32 @@ public class AgentService {
             toolReferences.values().stream().sorted(java.util.Comparator.comparing(KnowledgeReference::id))
                     .forEach(reference -> allReferences.putIfAbsent(reference.id(), reference));
             List<KnowledgeReference> cited = List.copyOf(allReferences.values());
+            invocation.businessOutcome("SUCCESS");
             return finish(IsdMetrics.AI_SUCCESS, startNanos,
                     new ChatAnswerResponse(truncate(answer.trim(), 10000), "LLM", cited.stream().map(KnowledgeReference::title).toList()),
-                    question, hits, cited, toolCalls.get(), true);
+                    question, hits, cited, toolCalls.get(), true).withUsageInvocation(invocation.id());
         } catch (TimeoutException ex) {
+            if (invocation != null) invocation.businessOutcome("TIMEOUT");
             log.warn("LLM 调用超过 {} 秒，降级为知识库检索", timeoutSeconds);
             return finish(IsdMetrics.AI_TIMEOUT, startNanos,
                     fallback(hits, "AI 响应超时"), question, hits, references, toolCalls.get(), false);
         } catch (InterruptedException ex) {
+            if (invocation != null) invocation.businessOutcome("ERROR");
             Thread.currentThread().interrupt();
             return finish(IsdMetrics.AI_ERROR, startNanos,
                     fallback(hits, "AI 调用被中断"), question, hits, references, toolCalls.get(), false);
         } catch (Exception ex) {
-            log.error("LLM 调用失败，降级为知识库检索", ex);
+            if (invocation != null) invocation.businessOutcome("ERROR");
+            // Provider exception messages may contain response bodies or credentials.
+            log.warn("LLM 调用失败，降级为知识库检索");
             return finish(IsdMetrics.AI_ERROR, startNanos,
                     fallback(hits, "AI 服务暂时不可用"), question, hits, references, toolCalls.get(), false);
         }
+    }
+
+    /** Structured-output validation happens after the model finishes, without changing its usage. */
+    public void markInvalidOutput(ChatAnswerResponse answer) {
+        if (answer.usageInvocationId() != null) usage.correctFallback(answer.usageInvocationId(), currentUserId());
     }
 
     /** 所有出口统一收口：每个分支必须记一次指标、也落一条审计 */
@@ -192,10 +216,6 @@ public class AgentService {
             metrics.recordAiRetrieval(IsdMetrics.RETRIEVAL_ERROR);
             return List.of();
         }
-    }
-
-    private boolean isConfigured() {
-        return apiKey != null && !apiKey.isBlank() && !PLACEHOLDER_KEY.equals(apiKey);
     }
 
     /**
@@ -270,10 +290,11 @@ public class AgentService {
                 + (bestOffset + CONTEXT_SNIPPET_CHARS < value.length() ? "…" : "");
     }
 
-    private String invokeLlm(String prompt, AtomicInteger toolCalls, Map<Long, KnowledgeReference> references) {
+    private String invokeLlm(String prompt, AiRuntimeSnapshot snapshot, AtomicInteger toolCalls, Map<Long, KnowledgeReference> references) {
         ToolCallContext.bind(toolCalls, references);
         try {
-            return llmClient.chat(prompt);
+            var result = llmClient.chat(prompt, snapshot);
+            return result == null ? null : result.text();
         } finally {
             ToolCallContext.clear();
         }

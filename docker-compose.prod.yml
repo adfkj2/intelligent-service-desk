@@ -60,6 +60,9 @@ services:
       DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
       REDIS_HOST: redis
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-local-placeholder}
+      # Production replicas must share one externally supplied 32-byte Base64 master key.
+      ISD_AI_MASTER_KEY: ${ISD_AI_MASTER_KEY:-}
+      ISD_AI_ALLOWED_ORIGINS: ${ISD_AI_ALLOWED_ORIGINS:-}
     depends_on:
       mysql:
         condition: service_healthy

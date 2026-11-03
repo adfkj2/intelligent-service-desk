@@ -24,9 +24,9 @@ class SchemaMigrationTest extends AbstractIntegrationTest {
     @DisplayName("Flyway 已应用全部迁移：业务表、幂等键、全文索引、AI 审计表、发件箱、清理索引都在")
     void schemaIsMigrated() {
         Integer applied = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM flyway_schema_history WHERE version IN ('1','2','3','4','5','6','7','8','9','10','11') AND success = 1",
+                "SELECT COUNT(*) FROM flyway_schema_history WHERE version IN ('1','2','3','4','5','6','7','8','9','10','11','12','13') AND success = 1",
                 Integer.class);
-        assertThat(applied).isEqualTo(11);
+        assertThat(applied).isEqualTo(13);
 
         List<String> tables = jdbcTemplate.queryForList(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()",
@@ -35,7 +35,8 @@ class SchemaMigrationTest extends AbstractIntegrationTest {
                 "sys_user", "ticket", "ticket_operation_log", "kb_category", "kb_item",
                 "ai_chat_log", "outbox_event", "notification", "flyway_schema_history",
                 "ticket_reply", "ticket_attachment", "ticket_support_profile", "ticket_sla_reminder",
-                "ai_conversation", "ai_conversation_message", "ai_answer_feedback", "kb_draft", "kb_feedback");
+                "ai_conversation", "ai_conversation_message", "ai_answer_feedback", "kb_draft", "kb_feedback", "ai_provider_configuration", "ai_provider_version",
+                "ai_runtime_setting", "ai_configuration_audit", "ai_provider_balance", "ai_usage_call", "ai_usage_attempt");
 
         List<String> userColumns = jdbcTemplate.queryForList(
                 "SELECT column_name FROM information_schema.columns "

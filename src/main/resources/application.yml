@@ -81,6 +81,11 @@ isd:
   ai:
     # 单次对话的硬超时（秒）：超过就走知识库降级，不能让用户干等
     timeout-seconds: 30
+    credentials:
+      master-key: ${ISD_AI_MASTER_KEY:}
+      key-file: ${ISD_AI_MASTER_KEY_FILE:.local/ai-master.key}
+      allow-local-generation: true
+    allowed-origins: ${ISD_AI_ALLOWED_ORIGINS:}
     rate-limit:
       # 成本护栏：每次对话都按 token 计费，没有配额等于对刷接口敞开大门
       enabled: true

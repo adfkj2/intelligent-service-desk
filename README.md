@@ -1,7 +1,7 @@
 # Intelligent Service Desk (ISD)
 
 [![CI](https://github.com/adfkj2/intelligent-service-desk/actions/workflows/ci.yml/badge.svg)](https://github.com/adfkj2/intelligent-service-desk/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-93.29%25-brightgreen)](docs/service-desk-upgrade.md)
+[![Coverage](https://img.shields.io/badge/coverage-94.39%25-brightgreen)](docs/service-desk-upgrade.md)
 [![Version](https://img.shields.io/badge/version-v1.0.0-blue)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -28,7 +28,7 @@
 | 知识库 | 分类与条目维护、关键词／全文检索；已解决工单整理为独立草稿，人工审核后发布；版本冲突保护、重复发布幂等、适用环境、复核日期和有效性反馈 |
 | AI 助手 | DeepSeek + 只读 Function Calling + RAG；智能建单草稿及缺失信息追问、服务端多轮会话、当前工单上下文、处理摘要／回复草稿／相似解决案例、可点击原文和相关片段、采纳与解决反馈；超时／无效 JSON／未配置模型均可降级 |
 | 站内信 | 接单 / 指派 / 状态变更自动通知相关人（**Transactional Outbox**：事件与业务同事务落库，调度器异步投递）；多实例靠 `(event_id, user_id)` 唯一索引幂等、重试有上限转 `FAILED`；未读数、单条/全部已读（越权 404） |
-| 管理台 | Vue 3 + Vite 响应式前端：角色工作台、工单协作、知识审核、用户管理、消息铃铛与按工单隔离的 AI 抽屉；构建产物打进同一个 jar |
+| 管理台 | Vue 3 + Vite 响应式前端：角色工作台、工单协作、知识审核、用户管理、AI 配置／Key／用量与余额、消息铃铛和按工单隔离的 AI 抽屉；构建产物打进同一个 jar |
 | 工程 | 参数校验、OpenAPI、Flyway、Testcontainers、GitHub Actions、Micrometer、traceId、Redis 登录／AI 配额限流、保留清理、CSRF 与生产 CSP；自动化回归包含并发、幂等、权限变化和真实浏览器流程 |
 
 ---
@@ -89,6 +89,16 @@
 
 首次下载 Maven 依赖较慢时，可在 `.env` 中设置 `MAVEN_MIRROR_URL=https://maven.aliyun.com/repository/public` 后重新启动。
 
+### 管理员：AI 配置与用量
+
+管理员登录后打开侧栏 **AI 配置与用量**，可新增 DeepSeek、通义千问、OpenAI 和自定义兼容服务，录入 API Key 与模型，保存待启用版本，测试通过后再确认设为当前。修改即时生效，无需重启；未启用的修改不会影响原服务，在途请求继续使用原版本。支持停用 AI、替换 Key 和归档，界面只显示 Key 末四位。
+
+用量页默认最近 30 天，可按用户、供应商、配置、模型、用途及结果筛选，查看业务调用、实际请求、Token、趋势、用户排名和按币种展示的费用估算。测试连接只发送固定测试内容，可能产生少量费用，并单独计入统计。Token 缺失显示未知；页面超时后的后台消耗仍会补记；价格修改不改变历史估算。DeepSeek 支持官方账户余额刷新，其他服务提供账务入口，余额不是每个 Key 独立的额度。
+
+本地双击启动会自动在独立持久卷保存加密主密钥；生产及多实例需注入相同的 `ISD_AI_MASTER_KEY`（Base64 编码的 32 字节随机值）。备份恢复时必须同时保留数据库和原主密钥。自定义服务域名需由部署方通过 `ISD_AI_ALLOWED_ORIGINS` 允许。原有环境变量 Key 在未使用后台管理前继续生效；显式停用后不会自动恢复该 Key。
+
+完整配置步骤、供应商地址、统计与余额边界、生产部署及备份恢复见 [AI 配置与用量管理](docs/ai-admin.md)。
+
 ### 1. 环境
 
 - JDK 21
@@ -110,7 +120,7 @@
 - 老库：首次启动以 `baseline-version: 1` 打基线，不会重复建表，也不影响已有数据；V2 之后的增量迁移会照常执行；
 - 改结构：新增 `V7__xxx.sql` 之类的迁移，**不要改已执行过的旧脚本**（校验和会变，Flyway 会拒绝启动）。
 
-现有 11 个迁移、17 张业务表：
+现有 13 个迁移、24 张业务表：
 
 | 版本 | 内容 |
 |---|---|
@@ -125,6 +135,8 @@
 | `V9__knowledge_review_workflow.sql` | 独立知识草稿、适用环境、审核与条目反馈 |
 | `V10__ai_conversation_retention.sql` | AI 会话保留清理索引；会话与消息默认保留 90 天 |
 | `V11__ai_suggestion_metrics.sql` | 区分普通问答与实际生成的草稿／处理建议，计算建议采纳率 |
+| `V12__ai_provider_configuration.sql` | 加密供应商 Key、配置版本、全局当前服务、管理审计及余额缓存 |
+| `V13__ai_usage_ledger.sql` | 独立 AI 用量与上游请求台账、Token、价格快照及费用估算 |
 
 外加 Flyway 自己的 `flyway_schema_history`。
 
@@ -159,7 +171,7 @@ npm run dev
 
 # 质量门禁（CI 里与 lint 同级阻断）
 npm run lint       # ESLint 9 flat config，--max-warnings=0
-npm test           # Vitest + Vue Test Utils（jsdom），30 个单测
+npm test           # Vitest + Vue Test Utils（jsdom），37 个单测
 npm run test:coverage   # 额外产出覆盖率报告到 web/coverage/
 ```
 
@@ -323,7 +335,7 @@ docker compose -f docker-compose.prod.yml down
 
 统一响应：`{"code": 0, "message": "OK", "data": ...}`，HTTP 状态码保留 2xx/400/401/403/404/409/429/500 语义。
 
-共 **55** 个 `/api` 接口。完整清单由 `ApiInventoryTest` 与 `src/test/resources/api-endpoints.txt` 逐行守护。下表保留原有接口，新增加的协作、AI、分派和知识审核接口见 [升级接口说明](docs/service-desk-upgrade.md#新增接口)。
+共 **69** 个 `/api` 接口。完整清单由 `ApiInventoryTest` 与 `src/test/resources/api-endpoints.txt` 逐行守护。下表保留原有接口，新增加的协作、AI、分派和知识审核接口见 [升级接口说明](docs/service-desk-upgrade.md#新增接口)，管理员 AI 配置及用量接口见 [管理接口](docs/ai-admin.md#管理接口)。
 
 | 模块 | 方法 | 路径 | 权限 |
 |---|---|---|---|
@@ -464,7 +476,7 @@ web/                   前端工程（独立 npm 包，构建产物回灌 src/ma
 | AI | 只读工具 + 身份取自 SecurityContext | 工具签名不带 userId，从根上堵死提示注入越权 |
 | RAG | 先全文召回 top-3，再拼进 user 消息 | 让模型基于内部术语作答；不塞进 system 提示词，避免动态内容污染行为约束 |
 | AI 审计 | 每次问答落 `ai_chat_log` | 记录召回条数、工具调用次数、耗时、来源；写入失败只 WARN，绝不影响回答 |
-| 前端形态 | Vue SPA + history 路由 | URL 可读（`/tickets/12`）；代价是后端加 7 条显式白名单转发，不用 `/**` 通配以免吞掉 `/api` |
+| 前端形态 | Vue SPA + history 路由 | URL 可读（`/tickets/12`）；代价是后端维护显式白名单转发，不用 `/**` 通配以免吞掉 `/api` |
 | 前后端联调 | Vite 代理 `/api` → 8081 | 浏览器只看到一个源，Session Cookie 天然同源，Spring 侧零 CORS 配置 |
 | 权限边界 | 前端隐藏按钮 ≠ 权限 | 可见性由 Service 的 `requireVisible` / `requireRole` 决定，前端裁剪只是减少误点 |
 | 管理端并发 | `version` 条件更新 + 管理员行锁 | 同一行覆盖用乐观锁；两个管理员互降导致 0 管理员，用按 id 排序的跨行锁兜底 |
@@ -484,13 +496,13 @@ CI 会统计 `@Test` 数量并与这里的「后端用例」比对，不一致�
 
 | 项 | 数字 |
 |---|---|
-| 后端用例 | 168 |
-| 前端单测 | 30 |
-| JaCoCo 行覆盖 | 93.29%（门禁 ≥ 90%） |
-| `/api` 接口 | 55 |
-| Flyway 迁移 | 11 |
-| 业务表 | 17 |
-| 浏览器 E2E | 6（2 条真实服务流程 + 4 条模拟接口流程） |
+| 后端用例 | 207 |
+| 前端单测 | 37 |
+| JaCoCo 行覆盖 | 94.39%（门禁 ≥ 90%） |
+| `/api` 接口 | 69 |
+| Flyway 迁移 | 13 |
+| 业务表 | 24 |
+| 浏览器 E2E | 10（2 条真实服务流程 + 8 条模拟接口流程） |
 
 ---
 
@@ -527,7 +539,7 @@ cd web && npx playwright install --with-deps chromium && npx playwright test
 | `PasswordFlowTest` | 6 | 重置密码、旧会话失效、临时密码强制改密、强制改密态的退出/联系方式、公开联系方式、清空联系方式校验 |
 | `LoginRateLimitTest` | 3 | 连错 5 次锁定（第 6 次正确密码也 429）、成功登录清零计数、IP 维度独立锁定 |
 | `UserRoleConcurrencyTest` | 2 | 并发改同一用户角色（version 只加 1）、过期 version 更新被拒 |
-| `SchemaMigrationTest` | 1 | Flyway 已应用 V1~V11、全部业务表与关键索引齐全 |
+| `SchemaMigrationTest` | 1 | Flyway 已应用 V1~V13、全部业务表与关键索引齐全 |
 | `ApiInventoryTest` | 1 | `/api` 路由清单与快照逐行比对，接口增删未同步文档时 CI 失败 |
 | `NotificationApiTest` | 7 | 本人通知、已读、越权、降权后旧指派／超时通知隔离 |
 | `NotificationRelayTest` | 2 | 同一事件重复投递只落一条（唯一索引兜底）、坏 payload 重试到上限转 `FAILED` |
@@ -597,6 +609,7 @@ CI 在 `.github/workflows/ci.yml`，五个 job 都是硬门禁（相互并行，
 
 ## 文档
 
+- [docs/ai-admin.md](docs/ai-admin.md) 管理员 AI 配置、用量、官方余额与密钥备份恢复
 - [docs/service-desk-upgrade.md](docs/service-desk-upgrade.md) 工单协作、智能报障、处理助手、时限与知识审核使用说明
 - [docs/release-checklist.md](docs/release-checklist.md) v1.0 发布门禁（十条 DoD，逐条命令与证据）
 - [docs/architecture.md](docs/architecture.md) 架构与关键取舍（ADR）

@@ -17,6 +17,7 @@ target/
 
 application-local.yml
 .env
+.local/
 
 .workbuddy/
 .codebuddy/

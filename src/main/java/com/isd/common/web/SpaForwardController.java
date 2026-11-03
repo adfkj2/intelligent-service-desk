@@ -26,7 +26,8 @@ public class SpaForwardController {
             "/tickets",
             "/tickets/{id}",
             "/kb",
-            "/admin/users"
+            "/admin/users",
+            "/admin/ai"
     })
     public String forward() {
         return "forward:/index.html";

@@ -1,6 +1,7 @@
 package com.isd.ai;
 
 import com.isd.ai.client.LlmClient;
+import com.isd.ai.client.LlmResult;
 import com.isd.auth.security.LoginUser;
 import com.isd.support.AbstractIntegrationTest;
 import com.isd.support.TestUsers;
@@ -15,6 +16,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
@@ -47,9 +49,9 @@ class AiTimeoutTest extends AbstractIntegrationTest {
     @Test
     @DisplayName("模型响应超过 1 秒：按超时降级，而不是无限等待")
     void slowLlmTriggersTimeout() throws Exception {
-        when(llmClient.chat(anyString())).thenAnswer(invocation -> {
+        when(llmClient.chat(anyString(), any())).thenAnswer(invocation -> {
             Thread.sleep(3000);
-            return "迟到的回答";
+            return LlmResult.text("迟到的回答");
         });
 
         mockMvc.perform(post("/api/ai/chat").with(user(EMPLOYEE))

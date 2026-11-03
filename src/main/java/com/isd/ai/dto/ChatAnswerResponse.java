@@ -1,6 +1,7 @@
 package com.isd.ai.dto;
 
 import java.util.List;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 /**
  * 对话响应。
@@ -16,12 +17,22 @@ import java.util.List;
  *                       降级时它就是答案本身的数据来源。
  */
 public record ChatAnswerResponse(String answer, String source, List<String> relatedTitles,
-                                 String conversationId, Long answerId, List<KnowledgeReference> references) {
+                                 String conversationId, Long answerId, List<KnowledgeReference> references,
+                                 @JsonIgnore String usageInvocationId) {
     public ChatAnswerResponse(String answer, String source, List<String> relatedTitles) {
-        this(answer, source, relatedTitles, null, null, List.of());
+        this(answer, source, relatedTitles, null, null, List.of(), null);
+    }
+
+    public ChatAnswerResponse(String answer, String source, List<String> relatedTitles,
+                              String conversationId, Long answerId, List<KnowledgeReference> references) {
+        this(answer, source, relatedTitles, conversationId, answerId, references, null);
     }
 
     public ChatAnswerResponse withConversation(String id) {
-        return new ChatAnswerResponse(answer, source, relatedTitles, id, answerId, references);
+        return new ChatAnswerResponse(answer, source, relatedTitles, id, answerId, references, usageInvocationId);
+    }
+
+    public ChatAnswerResponse withUsageInvocation(String id) {
+        return new ChatAnswerResponse(answer, source, relatedTitles, conversationId, answerId, references, id);
     }
 }

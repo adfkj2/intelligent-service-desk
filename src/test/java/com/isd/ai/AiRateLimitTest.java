@@ -1,6 +1,7 @@
 package com.isd.ai;
 
 import com.isd.ai.client.LlmClient;
+import com.isd.ai.client.LlmResult;
 import com.isd.ai.service.AiRateLimiter;
 import com.isd.auth.security.LoginUser;
 import com.isd.common.exception.BusinessException;
@@ -25,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.containsString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -70,7 +72,7 @@ class AiRateLimitTest extends AbstractIntegrationTest {
     @BeforeEach
     void resetQuota() {
         redis.delete(USER_KEY);
-        when(llmClient.chat(anyString())).thenReturn("已收到，正在查询。");
+        when(llmClient.chat(anyString(), any())).thenReturn(LlmResult.text("已收到，正在查询。"));
     }
 
     @AfterEach
@@ -91,7 +93,7 @@ class AiRateLimitTest extends AbstractIntegrationTest {
         // 计数落在 Redis：多实例共享，换实例绕不过去
         assertThat(redis.hasKey(USER_KEY)).isTrue();
         // 第三次在 Controller 就被拦下，没有产生 token 费用
-        verify(llmClient, times(2)).chat(anyString());
+        verify(llmClient, times(2)).chat(anyString(), any());
     }
 
     @Test

@@ -41,7 +41,7 @@ class KnowledgeWorkflowTest extends AbstractIntegrationTest {
     @Test
     void reopenedDuringGenerationCannotCreateKnowledgeDraft() throws Exception {
         long ticket = solvedTicket();
-        when(agent.chatWithContext(anyString(), anyString(), anyString())).thenAnswer(call -> {
+        when(agent.chatWithContext(anyString(), anyString(), anyString(), anyString())).thenAnswer(call -> {
             jdbc.update("UPDATE ticket SET status='IN_PROGRESS' WHERE id=?", ticket);
             return new ChatAnswerResponse("基础建议", "FALLBACK", List.of());
         });
@@ -67,7 +67,7 @@ class KnowledgeWorkflowTest extends AbstractIntegrationTest {
     void malformedGeneratedContentFallsBackAndPastReviewCannotPublish() throws Exception {
         long ticket = solvedTicket();
         long category = category();
-        when(agent.chatWithContext(anyString(), anyString(), anyString()))
+        when(agent.chatWithContext(anyString(), anyString(), anyString(), anyString()))
                 .thenReturn(new ChatAnswerResponse("invalid json", "LLM", List.of()));
         String response = mvc.perform(post("/api/kb/drafts/from-ticket").with(user(SUPPORT)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"ticketId\":" + ticket + "}"))
@@ -109,7 +109,7 @@ class KnowledgeWorkflowTest extends AbstractIntegrationTest {
     @Test
     void draftRequiresReviewAndPublicationIsIdempotent() throws Exception {
         long ticket = solvedTicket();
-        when(agent.chatWithContext(anyString(), anyString(), anyString()))
+        when(agent.chatWithContext(anyString(), anyString(), anyString(), anyString()))
                 .thenReturn(new ChatAnswerResponse("资料不足", "FALLBACK", List.of()));
         long category = category();
         String draftJson = mvc.perform(post("/api/kb/drafts/from-ticket").with(user(SUPPORT))
@@ -141,7 +141,7 @@ class KnowledgeWorkflowTest extends AbstractIntegrationTest {
     void structuredDraftCanBeEditedButStaleVersionCannotPublish() throws Exception {
         long ticket = solvedTicket();
         long category = category();
-        when(agent.chatWithContext(anyString(), anyString(), anyString())).thenReturn(new ChatAnswerResponse(
+        when(agent.chatWithContext(anyString(), anyString(), anyString(), anyString())).thenReturn(new ChatAnswerResponse(
                 "{\"title\":\"VPN 连接排查\",\"content\":\"检查客户端版本；重新登录后验证连接。\",\"tags\":\"VPN\"}", "LLM", List.of()));
         String response = mvc.perform(post("/api/kb/drafts/from-ticket").with(user(SUPPORT)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"ticketId\":" + ticket + "}"))
