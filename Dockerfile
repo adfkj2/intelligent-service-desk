@@ -6,7 +6,7 @@
 # 只改业务代码时这一层能命中缓存。
 
 # ---------- 1. 前端 ----------
-FROM node:20-alpine AS frontend
+FROM node:25-alpine AS frontend
 
 WORKDIR /build/web
 COPY web/package.json web/package-lock.json ./
