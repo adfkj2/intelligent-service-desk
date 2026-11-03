@@ -13,7 +13,7 @@
 | MySQL 在跑 | 服务列表 `MySQL80` | 运行中 |
 | 表齐全 | `USE isd; SHOW TABLES;` | 8 张业务表（含 `ai_chat_log` / `outbox_event` / `notification`）+ `flyway_schema_history` |
 | Redis | `docker exec isd-redis redis-cli ping` | `PONG`（会话存储，没起它应用会启动失败） |
-| 应用启动 | `java -jar target/isd-0.0.1-SNAPSHOT.jar` | `Tomcat started on port 8081` |
+| 应用启动 | `java -jar target/isd-1.1.0.jar` | `Tomcat started on port 8081` |
 | 管理台 | 打开 `http://localhost:8081/` | 出现登录页（404/白屏说明没构建前端：`cd web && npm run build` 后重新打包） |
 | LLM Key | `src/main/resources/application-local.yml` | `spring.ai.openai.api-key` 非占位符 |
 | 管理员联系方式 | `SELECT username, phone, email FROM isd.sys_user WHERE role='ADMIN' AND status=1;` | 至少一个管理员填了手机号或邮箱，否则「忘记密码」只能显示空状态 |

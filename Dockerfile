@@ -46,7 +46,7 @@ ENV TZ=Asia/Shanghai
 RUN addgroup -S isd && adduser -S -G isd isd
 
 WORKDIR /app
-COPY --from=backend /build/target/isd-0.0.1-SNAPSHOT.jar /app/app.jar
+COPY --from=backend /build/target/isd-1.1.0.jar /app/app.jar
 RUN mkdir -p /var/lib/isd/ai && chown -R isd:isd /app /var/lib/isd
 USER isd
 

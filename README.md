@@ -1,621 +1,258 @@
-# Intelligent Service Desk (ISD)
+# Intelligent Service Desk
 
 [![CI](https://github.com/adfkj2/intelligent-service-desk/actions/workflows/ci.yml/badge.svg)](https://github.com/adfkj2/intelligent-service-desk/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-94.39%25-brightgreen)](docs/service-desk-upgrade.md)
-[![Version](https://img.shields.io/badge/version-v1.0.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.1.0-blue)](https://github.com/adfkj2/intelligent-service-desk/releases/tag/v1.1.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Coverage](https://img.shields.io/badge/coverage-94.50%25-brightgreen)](docs/release-checklist.md)
 
-> **v1.0 发布门禁**：后端/前端/镜像/E2E/安全/性能/依赖/数字/版本/文档十条，逐条附命令与证据 →
-> [docs/release-checklist.md](docs/release-checklist.md)
+**企业内网 IT 服务台**：员工用一句话报障，技术支持在工单里协作处理，解决经验沉淀为可审核的知识，AI 全程辅助但从不替人做决定。
 
-当前分支包含 v1.0 之后的协作与 AI 功能升级，更新记录见 [CHANGELOG.md](CHANGELOG.md) 的 Unreleased 部分；上方版本徽标指最近正式版本。
+- **对员工**：不用学工单模板，描述现象即可得到可编辑草稿，AI 会追问缺失信息。
+- **对技术支持**：公开回复与内部备注分离，附件、处理时限、转派和重开都在一个时间线里。
+- **对管理员**：人员负荷、AI 供应商、Key、调用量与分币种费用都能在后台看清。
 
-企业 IT 智能服务台：工单协作、处理时限、知识审核，以及基于真实数据的 AI 辅助报障与处理。
+[![工作台：待办队列、最近工单、服务效率与人员负荷](docs/screenshots/workbench.png)](docs/screenshots/workbench.png)
 
-面向企业内网 IT 支持：员工描述问题并确认建单，技术支持在工单内沟通和处理，管理员查看积压与人员负荷。AI 基于**当前登录用户有权查看的数据**生成建议；采用草稿不会提交，业务操作仍需用户确认。
+*图 1：管理员工作台（演示环境，示例数据）。*
 
-本次升级的使用流程、接口、权限边界、处理时限和部署说明见 [工单协作与 AI 辅助使用说明](docs/service-desk-upgrade.md)。
+> 截图均来自真实运行页面，使用虚构账号与示例数据；不包含真实密钥、内部地址或个人信息。AI 用量为页面明确标注的模拟台账数据。
 
 ---
 
-## 功能
+## 快速入口
 
-| 模块 | 能力 |
+| 我想… | 去哪里 |
 |---|---|
-| 认证与权限 | 注册 / 登录 / 注销（Session Cookie）、BCrypt 密码哈希、三角色 RBAC（EMPLOYEE / SUPPORT / ADMIN）、资源级访问控制、**会话外置 Redis（多实例踢人一致）** |
-| 工单 | 幂等创建、接单／指派／转派、公开回复与内部备注、附件上传及受控下载、待补充与恢复、已解决工单重开、操作审计与乐观锁；列表增加处理人、优先级、时间和快捷队列 |
-| 工作台与时限 | 按角色展示待办、积压与人员负荷，记录填写／响应／解决用时和重开率；按优先级计算首次响应及解决期限，等待补充暂停解决计时，临期提醒和超时升级去重投递；按技能和工作量推荐处理人 |
-| 知识库 | 分类与条目维护、关键词／全文检索；已解决工单整理为独立草稿，人工审核后发布；版本冲突保护、重复发布幂等、适用环境、复核日期和有效性反馈 |
-| AI 助手 | DeepSeek + 只读 Function Calling + RAG；智能建单草稿及缺失信息追问、服务端多轮会话、当前工单上下文、处理摘要／回复草稿／相似解决案例、可点击原文和相关片段、采纳与解决反馈；超时／无效 JSON／未配置模型均可降级 |
-| 站内信 | 接单 / 指派 / 状态变更自动通知相关人（**Transactional Outbox**：事件与业务同事务落库，调度器异步投递）；多实例靠 `(event_id, user_id)` 唯一索引幂等、重试有上限转 `FAILED`；未读数、单条/全部已读（越权 404） |
-| 管理台 | Vue 3 + Vite 响应式前端：角色工作台、工单协作、知识审核、用户管理、AI 配置／Key／用量与余额、消息铃铛和按工单隔离的 AI 抽屉；构建产物打进同一个 jar |
-| 工程 | 参数校验、OpenAPI、Flyway、Testcontainers、GitHub Actions、Micrometer、traceId、Redis 登录／AI 配额限流、保留清理、CSRF 与生产 CSP；自动化回归包含并发、幂等、权限变化和真实浏览器流程 |
+| **下载 v1.1.0** | [Release 附件](https://github.com/adfkj2/intelligent-service-desk/releases/tag/v1.1.0)：`isd-1.1.0.jar`、`isd-1.1.0-source.zip`、`SHA256SUMS.txt` |
+| **5 分钟跑起来** | [三步启动](#三步启动) |
+| **先看看页面** | [功能导览](#功能导览) |
+| **部署到内网** | [部署与运维](docs/operations.md) |
+| **从 v1.0.0 升级** | [升级到 v1.1.0](docs/upgrade.md)（先备份数据库与 AI 主密钥） |
+| **这次改了什么** | [CHANGELOG](CHANGELOG.md) · [v1.1.0 发布说明](docs/release-notes-v1.1.0.md) |
 
 ---
 
-## 技术栈
+## 三步启动
 
-| 组件 | 版本 / 选择 | 说明 |
+不需要安装 Java、Node.js、Maven、MySQL 或 Redis。
+
+### 1. 安装 Docker Desktop
+
+下载并完成 [Docker Desktop](https://www.docker.com/products/docker-desktop/) 首次设置，使用 Linux 容器模式。
+
+### 2. 解压源码包，双击 `demo.cmd`
+
+从 Release 下载 `isd-1.1.0-source.zip`，解压后双击根目录的 **`demo.cmd`**。窗口会检查 Docker、构建镜像、等待数据库和应用就绪，然后自动打开浏览器。首次需要下载依赖，通常几分钟；之后复用缓存。
+
+### 3. 用演示账号登录
+
+| 角色 | 账号 | 密码 |
 |---|---|---|
-| Java | 21 | LTS |
-| Spring Boot | 3.5.16 | Web / Validation / Security / Test |
-| Spring AI | 1.1.0 | BOM 管理，OpenAI starter 接 DeepSeek |
-| MyBatis | 3.0.5 | 注解 SQL + 动态 `<script>`，复杂 SQL 走 XML |
-| MySQL | 8.0 | utf8mb4，InnoDB |
-| 可观测性 | Micrometer + Prometheus | Actuator 指标端点在独立 8082，日志带 `traceId` |
-| Flyway | 随 Boot | `db/migration/V*.sql` 版本化迁移，启动自动升级；老库靠 baseline 兼容 |
-| Testcontainers | 随 Boot | 跑测试时起一次性 MySQL 容器，没有 Docker 自动回退本机库 |
-| Spring Security | 随 Boot | Session 认证 + URL 级/资源级授权 |
-| Spring Session | 随 Boot（3.5.x） | 会话存 Redis，`indexed` 仓库维护 principal 索引 |
-| Redis | 7.4（`docker compose`） | 会话共享存储；本地容器名 `isd-redis` |
-| springdoc-openapi | 2.8.9 | Swagger UI |
-| 前端 | Vue 3.5 + Vite 5 + Element Plus 2.9 + Pinia + Tailwind | 独立 `web/` 工程，`npm run build` 产出到 `src/main/resources/static` |
-| 测试 | JUnit 5 + MockMvc + AssertJ + Playwright | 后端回归、前端交互测试、真实服务与模拟接口浏览器流程 |
+| 管理员 | `demo_admin` | `admin12345` |
+| 技术支持 | `demo_sup` | `support123` |
+| 员工 | `demo_emp` | `employee123` |
 
----
+打开 <http://localhost:8081/>，建议先用管理员看工作台，再用员工新建一张工单走完整流程。
 
-## 快速开始
+### 跨平台与常用命令
 
-### 推荐：Windows 双击启动
-
-只需要安装并完成 [Docker Desktop](https://www.docker.com/products/docker-desktop/) 的首次设置，使用 Linux 容器模式。无需另外安装 Java、Node.js、Maven、MySQL 或 Redis。
-
-1. 首次体验：在项目文件夹中双击 **`demo.cmd`**。
-2. 等待窗口显示 `Ready`，浏览器会自动打开 [服务台](http://localhost:8081/)。首次需要下载镜像并构建，耗时可能为数分钟；之后会复用缓存。
-3. 使用演示账号登录：管理员 `demo_admin / admin12345`，技术支持 `demo_sup / support123`，员工 `demo_emp / employee123`。
-
-`demo.cmd` 只在数据库没有用户时创建演示账号；已有用户时直接跳过，不修改原账号的密码、角色或启用状态。日常启动双击 **`start.cmd`**；停止双击 **`stop.cmd`**，数据库和附件等数据会保留。关闭启动窗口不会停止后台服务。
-
-启动器会自动检查本机 Docker，必要时后台启动 Docker Desktop，等待数据库、Redis 和应用就绪后再打开页面。快捷方式默认仅允许本机访问。
-
-也可以在项目目录的 PowerShell 中运行：
-
-| 操作 | 命令 |
-|---|---|
-| 首次演示启动 | `.\demo.cmd` |
-| 正常启动，自动构建最新代码 | `.\start.cmd` |
-| 快速启动已有镜像 | `.\start.cmd -NoBuild` |
-| 改用其他端口 | `.\start.cmd -Port 18081` |
-| 启动但不打开浏览器 | `.\start.cmd -NoBrowser` |
-| 查看服务状态 | `.\start.cmd -Action Status` |
-| 查看应用日志，Ctrl+C 退出查看 | `.\start.cmd -Action Logs` |
-| 停止并保留数据 | `.\stop.cmd` |
-
-修改代码后用普通 `start.cmd` 重新构建；`-NoBuild` 适合没有代码变更时快速恢复服务。如果 8081 已被占用，可使用 `demo.cmd -Port 18081`，就绪后自动打开对应地址。
-
-**可选配置**：需要接入 DeepSeek 或固定端口时，将 `.env.example` 复制为项目根目录的 `.env`，填写 `DEEPSEEK_API_KEY`、`ISD_HTTP_PORT` 等配置。不填模型 Key 也能使用工单、知识库和 AI 降级建议。`.env` 已排除在 Git 和镜像构建上下文之外。已有数据库的密码应保持原值，修改 `MYSQL_ROOT_PASSWORD` 不会自动修改数据卷中的数据库密码。
-
-若首次 Docker 设置尚未完成，先打开 Docker Desktop 完成设置再重试；若构建失败，窗口会保留错误信息，可用 `start.cmd -Action Logs` 查看应用日志。以下是手动开发和部署说明，使用上述快捷启动时无需逐步执行。
-
-首次下载 Maven 依赖较慢时，可在 `.env` 中设置 `MAVEN_MIRROR_URL=https://maven.aliyun.com/repository/public` 后重新启动。
-
-### 管理员：AI 配置与用量
-
-管理员登录后打开侧栏 **AI 配置与用量**，可新增 DeepSeek、通义千问、OpenAI 和自定义兼容服务，录入 API Key 与模型，保存待启用版本，测试通过后再确认设为当前。修改即时生效，无需重启；未启用的修改不会影响原服务，在途请求继续使用原版本。支持停用 AI、替换 Key 和归档，界面只显示 Key 末四位。
-
-用量页默认最近 30 天，可按用户、供应商、配置、模型、用途及结果筛选，查看业务调用、实际请求、Token、趋势、用户排名和按币种展示的费用估算。测试连接只发送固定测试内容，可能产生少量费用，并单独计入统计。Token 缺失显示未知；页面超时后的后台消耗仍会补记；价格修改不改变历史估算。DeepSeek 支持官方账户余额刷新，其他服务提供账务入口，余额不是每个 Key 独立的额度。
-
-本地双击启动会自动在独立持久卷保存加密主密钥；生产及多实例需注入相同的 `ISD_AI_MASTER_KEY`（Base64 编码的 32 字节随机值）。备份恢复时必须同时保留数据库和原主密钥。自定义服务域名需由部署方通过 `ISD_AI_ALLOWED_ORIGINS` 允许。原有环境变量 Key 在未使用后台管理前继续生效；显式停用后不会自动恢复该 Key。
-
-完整配置步骤、供应商地址、统计与余额边界、生产部署及备份恢复见 [AI 配置与用量管理](docs/ai-admin.md)。
-
-### 1. 环境
-
-- JDK 21
-- MySQL 8（本地 3306，服务名 `MySQL80`）
-- **Redis 7（会话存储，默认 `127.0.0.1:6379`）**：仓库根目录 `docker compose up -d` 一键起
-- **无需安装 Maven**：仓库自带 Maven Wrapper（`mvnw` / `mvnw.cmd`，锁定 3.9.16），首次运行自动下载到 `~/.m2/wrapper/`；用 IDEA 的话内置 Maven 也能直接跑
-- Node 18+（**只有改前端时才需要**；只想跑现成页面可跳过）
-- Docker Desktop（跑测试时用来起 MySQL / Redis 容器；没有就自动回退本机服务）
-
-> 会话不再放在 Tomcat 进程内存，而是 Spring Session + Redis。**Redis 不可用时应用会直接启动失败**——
-> 这是刻意的：不做静默降级，否则会出现「本地能跑、线上多实例踢人失效」的假象。
-
-### 2. 建库建表
-
-表结构由 **Flyway** 版本化管理，脚本在 `src/main/resources/db/migration/`，应用启动时自动执行：
-
-- 新环境：JDBC URL 带 `createDatabaseIfNotExist=true`，连上即自动建库 + 建表，不用手工跑 SQL；
-- 想手工建库：执行 `src/main/resources/db/bootstrap.sql`（只有 `CREATE DATABASE`）；
-- 老库：首次启动以 `baseline-version: 1` 打基线，不会重复建表，也不影响已有数据；V2 之后的增量迁移会照常执行；
-- 改结构：新增 `V7__xxx.sql` 之类的迁移，**不要改已执行过的旧脚本**（校验和会变，Flyway 会拒绝启动）。
-
-现有 13 个迁移、24 张业务表：
-
-| 版本 | 内容 |
-|---|---|
-| `V1__init_schema.sql` | `sys_user`、`ticket`、`ticket_operation_log`、`kb_category`、`kb_item` |
-| `V2__ticket_idempotency.sql` | `ticket.idempotency_key` + 唯一索引 `uk_creator_idempotency`（创建工单幂等） |
-| `V3__kb_fulltext_index.sql` | `kb_item` 的 FULLTEXT 索引（ngram 分词，供 RAG 召回） |
-| `V4__ai_chat_log.sql` | `ai_chat_log`（AI 问答审计） |
-| `V5__outbox_and_notification.sql` | `outbox_event`、`notification`（Transactional Outbox + 站内信） |
-| `V6__retention_indexes.sql` | `ai_chat_log`、`notification` 的清理索引（保留策略按时间分批删） |
-| `V7__ticket_collaboration.sql` | 回复、附件、技能、时限提醒去重与工单协作字段 |
-| `V8__ai_conversations.sql` | AI 会话、最近消息和回答反馈 |
-| `V9__knowledge_review_workflow.sql` | 独立知识草稿、适用环境、审核与条目反馈 |
-| `V10__ai_conversation_retention.sql` | AI 会话保留清理索引；会话与消息默认保留 90 天 |
-| `V11__ai_suggestion_metrics.sql` | 区分普通问答与实际生成的草稿／处理建议，计算建议采纳率 |
-| `V12__ai_provider_configuration.sql` | 加密供应商 Key、配置版本、全局当前服务、管理审计及余额缓存 |
-| `V13__ai_usage_ledger.sql` | 独立 AI 用量与上游请求台账、Token、价格快照及费用估算 |
-
-外加 Flyway 自己的 `flyway_schema_history`。
-
-### 3. 本机配置
-
-复制 `src/main/resources/application-local.yml.example` 为 `application-local.yml`，填入本机数据库密码与 LLM Key：
-
-```yaml
-spring:
-  datasource:
-    password: "你的 MySQL 密码"
-  ai:
-    openai:
-      api-key: "sk-你的 DeepSeek Key"
-```
-
-`application-local.yml` 已被 `.gitignore` 排除，不会进仓库。也可以用环境变量 `DEEPSEEK_API_KEY` 覆盖。
-
-> 不填 Key 也能启动：`AgentService` 检测到占位 Key 会直接走知识库降级，AI 接口返回 `source=FALLBACK`。
-
-### 4. 前端构建（改前端才需要）
-
-前端是 `web/` 下的独立 Vite 工程，构建产物输出到 `src/main/resources/static`，最终仍是一个 jar。`src/main/resources/static/` 已加入 `.gitignore`，**新克隆仓库必须先构建前端**，否则后端只有接口、没有页面。
-
-```bash
-cd web
-npm install
-npm run build            # 输出到 ../src/main/resources/static
-
-# 开发模式（可选）：5173 端口，/api 由 Vite 代理到 8081，改代码热更新
-npm run dev
-
-# 质量门禁（CI 里与 lint 同级阻断）
-npm run lint       # ESLint 9 flat config，--max-warnings=0
-npm test           # Vitest + Vue Test Utils（jsdom），37 个单测
-npm run test:coverage   # 额外产出覆盖率报告到 web/coverage/
-```
-
-开发期浏览器只看到 `http://localhost:5173` 一个源，`JSESSIONID` 因此是同源 Cookie：**Spring 侧不需要任何 CORS 配置，前端也不把 token 存 localStorage**。
-
-### 5. 启动
-
-```bash
-# 0. 先起 Redis（会话存储，只需第一次）
-docker compose up -d
-
-# IDEA：直接运行 com.isd.IsdApplication
-# 命令行（Windows；macOS/Linux 用 ./mvnw）：
-.\mvnw.cmd -DskipTests package
-java -jar target/isd-0.0.1-SNAPSHOT.jar
-```
-
-> `mvnw` 是 Maven Wrapper：仓库锁定了 Maven 3.9.16，第一次执行会把发行包（约 9 MB）下到 `~/.m2/wrapper/dists/`，之后等同本机装了 Maven，不再联网。CI 里也用 `./mvnw`，所以「你本地 3.9.x、CI 上 3.8」这类版本漂移不会发生。
->
-> 国内网络下载 central 慢时，用环境变量换源即可（不必改仓库里的文件）：
->
-> ```powershell
-> $env:MVNW_REPOURL="https://maven.aliyun.com/repository/public"
-> .\mvnw.cmd verify
-> ```
->
-> 注意 wrapper 的缓存目录按 URL 哈希分目录，**换源后首次会重新下载一份**；想一直用镜像就把这条环境变量设到用户级环境变量里，别只在单次命令里 export。
-
-端口 **8081**（8080 被本机 Apache 占用）。
-
-```bash
-curl http://localhost:8081/api/ping
-# {"code":0,"message":"OK","data":{"status":"UP","service":"isd","time":"..."}}
-```
-
-启动后浏览器打开 <http://localhost:8081/> 即进入管理台登录页。
-
-### 6. 接口文档
-
-启动后打开 <http://localhost:8081/swagger-ui.html>。
-
-用 Session 认证，所以在 Swagger 里先调 `POST /api/auth/login`，浏览器会自动带上 `JSESSIONID`，其余接口直接可用。
-
-### 7. 创建技术支持 / 管理员
-
-注册接口固定给 EMPLOYEE 角色（防提权）。新账号注册后，由**已有管理员**在「用户管理」页调整角色。角色变更或禁用提交后，系统立即失效目标用户的旧登录会话；角色变更后需重新登录，禁用账号无法登录。
-
-第一次从零启动时还没有管理员，先用 SQL 提权一个（之后就可以全在页面上操作）：
-
-```sql
--- 先注册账号：POST /api/auth/register {"username":"demo_admin","password":"admin12345"}
-UPDATE sys_user SET role = 'ADMIN' WHERE username = 'demo_admin';
--- 角色变更后必须重新登录（身份在登录时读入 Session）
-```
-
-管理员不能修改自己的角色，避免误操作把自己降权后失去管理入口；系统也会拒绝降级/禁用**最后一个启用状态的管理员**。两个管理员同时操作同一账号时，后到的一方会收到 409「已被其他管理员修改」，页面自动刷新后重试即可。
-
-完整演示步骤见 [docs/demo-script.md](docs/demo-script.md)。
-
-### 8. 一条命令起全栈（可选，不装 MySQL 也能跑）
-
-本机开发、全栈容器、仅打包三种方式按需选一种：
-
-| 方式 | 命令 | 适用 |
-|---|---|---|
-| 本机开发 | `docker compose up -d` + IDEA 运行 `IsdApplication` | 改代码热更新；MySQL 用本机 `MySQL80` |
-| **全栈容器** | `docker compose -f docker-compose.stack.yml up -d --build` | 新机器、演示、验收；MySQL 与 Redis 都在容器里 |
-| **生产向（TLS）** | `.\deploy\certs\generate.ps1` + `docker compose -f docker-compose.prod.yml up -d --build` | 经 Nginx + HTTPS 访问，app 不暴露 8081（见下一节） |
-| 仅打包 | `./mvnw -DskipTests package`（需先 `cd web && npm run build`） | 只要一个可运行的 jar |
-
-> 三个 compose 文件是**三个独立项目**（项目名分别是 `intelligentservicedesk` / `isd-stack` / `isd-prod`），容器名与端口互不冲突：开发依赖那个只占用 6379，全栈栈只占用 8081，生产向只占用 80/443。技术上可以同时起，但没必要——同时跑两套 Redis 只是平白多占内存，实际使用时挑一种即可。
-
-全栈栈包含三个服务：`mysql`（8.0.36，数据卷 `isd-mysql-data`）、`redis`（7.4，开启 `notify-keyspace-events`）、`app`（本仓库 `Dockerfile` 构建，`8081:8081`）。`app` 用 `depends_on: service_healthy` 等依赖就绪，Flyway 随后自动建库建表。数据库会话和业务计算统一使用上海时间，避免 UTC 数据库宿主导致时限偏移。
+`demo.cmd` 面向 Windows。macOS / Linux 用同一条 Docker 命令：
 
 ```bash
 docker compose -f docker-compose.stack.yml up -d --build
-docker compose -f docker-compose.stack.yml ps          # 三个服务应都是 healthy
-curl http://localhost:8081/api/ping                    # {"code":0,...}
-docker compose -f docker-compose.stack.yml logs -f app # 排错
-docker compose -f docker-compose.stack.yml down        # 保留数据卷
-docker compose -f docker-compose.stack.yml down -v     # 连数据一起删
+# 就绪后打开 http://localhost:8081/
 ```
 
-进容器查库：`docker compose -f docker-compose.stack.yml exec mysql mysql -uroot -p isd`。
+| 操作 | Windows | macOS / Linux |
+|---|---|---|
+| 首次演示启动 | `demo.cmd` | `docker compose -f docker-compose.stack.yml up -d --build` |
+| 日常启动 / 重建 | `start.cmd` | 同上 |
+| 快速启动已有镜像 | `start.cmd -NoBuild` | `docker compose -f docker-compose.stack.yml up -d` |
+| 停止并保留数据 | `stop.cmd` | `docker compose -f docker-compose.stack.yml down` |
+| 停止并清空演示数据 | — | `docker compose -f docker-compose.stack.yml down -v` |
+| 换端口 | `start.cmd -Port 18081` | 改 `.env` 的 `ISD_HTTP_PORT` |
+| 查看日志 | `start.cmd -Action Logs` | `docker compose -f docker-compose.stack.yml logs -f app` |
 
-**镜像本身**（`Dockerfile`，三阶段：Node 构建前端 → Maven 打包 → JRE 运行）：
+`demo.cmd` 只在数据库没有用户时创建演示账号，不覆盖已有账号。关闭启动窗口不会停止后台服务。
+
+### 直接运行 JAR
+
+`isd-1.1.0.jar` **已包含构建后的前端页面**，但仍需要 MySQL 8 与 Redis 7：
 
 ```bash
-docker build -t isd:local .
-# 国内网络若拉不到基础镜像或 Maven 依赖，换镜像源：
-docker build --build-arg MAVEN_MIRROR_URL=https://maven.aliyun.com/repository/public -t isd:local .
+java -jar isd-1.1.0.jar
+# 默认 http://localhost:8081/
 ```
 
-- 前端在镜像内构建：`src/main/resources/static/` 被 `.gitignore` 排除，镜像不能依赖本机是否构建过前端；
-- 运行时用非 root 用户 `isd`，`HEALTHCHECK` 打容器内 `127.0.0.1:8082/actuator/health`（管理端口只绑本机，所以宿主机访问不到 8082，健康状态看 `docker ps` 的 `(healthy)`）；
-- `.dockerignore` 排除了 `target/`、`web/node_modules/`、`static/` 与 `application-local.yml`（含真实密码/Key），构建上下文只有几 MB，也不会把密钥打进镜像。
+数据库、Redis 与 AI Key 通过环境变量配置，完整清单见 [部署与运维](docs/operations.md#关键环境变量)。
 
-### 9. 生产形态：Nginx + TLS 反代（可选）
+### 可选：接入真实模型
 
-`docker-compose.prod.yml` 在栈上再加一层 Nginx：TLS 终止、HSTS、gzip、静态资源长缓存，**app 不再映射宿主机端口**——绕过反代直连 8081 这条路被堵死。
+不填 Key 也能完整使用工单、知识库和 AI 降级建议。需要真实模型时，在根目录 `.env` 中填写：
 
-```powershell
-.\deploy\certs\generate.ps1        # 自签证书；本机没 openssl 时自动借用 maven 镜像里的 openssl
-docker compose -f docker-compose.prod.yml up -d --build
-curl -k https://localhost/api/ping # 浏览器会告警，点"继续访问"即可（仅本地演示）
-docker compose -f docker-compose.prod.yml down
+```dotenv
+DEEPSEEK_API_KEY=sk-你的Key
 ```
 
-日志统一走 stdout/stderr（`docker compose logs nginx|app`），不额外挂日志卷；证书文件已被 `.gitignore` 排除，仓库里只有生成脚本。
-
-实测验收（本机，`isd-prod` 项目）：
-
-| 检查 | 命令 | 结果 |
-|---|---|---|
-| HTTP 强制跳 HTTPS | `curl -s -o NUL -w "%{http_code}" http://localhost/api/ping` | `301` |
-| HTTPS 可用 | `curl -k -s -o NUL -w "%{http_code}" https://localhost/api/ping` | `200` |
-| 会话 Cookie 加 Secure | 登录响应 `Set-Cookie` | `SESSION=...; Path=/; Secure; HttpOnly; SameSite=Lax` |
-| CSRF 缺 token 被拒 | `POST /api/auth/register`（不带 `X-XSRF-TOKEN`） | `403` + `{"code":40300}` |
-| CSRF 带 token 通过 | 同上 + `-H "X-XSRF-TOKEN: <XSRF-TOKEN 值>"` | 201/200 + `{"code":0}` |
-| 应用端口不对外 | 访问 `http://localhost:8081` | 连接超时（无映射，符合预期） |
-| 安全响应头 | `curl -k -D - https://localhost/api/ping` | `Strict-Transport-Security` / `X-Content-Type-Options` / `X-Frame-Options` 各一份，另加 Nginx 的 `Referrer-Policy` |
-| CSP 生效 | 同上 | `script-src 'self'`、`style-src 'self' 'unsafe-inline'`、`object-src 'none'`、`frame-ancestors 'none'`，不含 `unsafe-eval` |
-
-> 安全头只由 Spring Security 输出，Nginx 不再重复添加（实测两边都加会出现重复响应头）。生产 profile（`SPRING_PROFILES_ACTIVE=prod`）还会：关掉 Swagger 文档、把 `forward-headers-strategy` 设为 `framework` 以还原 `X-Forwarded-Proto`、把管理端口继续绑在容器内 `127.0.0.1:8082`、按 `isd.security.csp.enabled=true` 下发 CSP（策略见 `CspPolicy`，开发期关闭以保住 Vite HMR 与 Swagger）。
+或登录管理员，在「AI 配置与用量」中录入供应商、模型和 Key，测试连接后设为当前服务。详见 [AI 配置与用量](docs/ai-admin.md)。
 
 ---
 
-## 界面与角色
+## 功能导览
 
-三个角色看到的是同一套页面，菜单与操作按钮按角色裁剪（**前端隐藏只是体验，数据范围始终由后端 Service 决定**）：
+### 1. 员工报障：说清楚问题，AI 帮你整理
 
-| 页面 | 路由 | 员工 | 技术支持 | 管理员 |
-|---|---|:---:|:---:|:---:|
-| 登录 / 注册（含“忘记密码”管理员联系方式） | `/login` | ✓ | ✓ | ✓ |
-| 修改密码（重置后强制进入） | `/change-password` | ✓ | ✓ | ✓ |
-| 工作台（角色待办 + 服务效率 + 最近工单） | `/` | ✓ 仅本人 | ✓ 全量 | ✓ 全量 + 人员负荷 |
-| 工单列表（筛选 + 服务端分页） | `/tickets` | ✓ 仅本人 | ✓ 工单池 | ✓ 工单池 |
-| 新建工单 | `/tickets/create` | ✓ | ✓ | ✓ |
-| 工单详情（时间线 + 接单/指派/解决/关闭） | `/tickets/:id` | ✓ | ✓ | ✓ |
-| 知识库（分类 + 检索 + 编辑） | `/kb` | 只读 | ✓ 维护自己的条目 | ✓ 全量 + 建分类 |
-| 用户管理（启用/禁用、调整角色、重置密码） | `/admin/users` | — | — | ✓ |
-| AI 助手（右下角抽屉，任意页面） | — | ✓ | ✓ | ✓ |
+[![智能报障：自然语言描述、缺失信息追问、可编辑草稿与提交确认](docs/screenshots/ticket-create.png)](docs/screenshots/ticket-create.png)
 
-演示账号（首次准备见 [docs/demo-script.md](docs/demo-script.md)）：
+*图 2：智能报障。左侧是 AI 草稿与追问，右侧是采用后可继续编辑的工单表单。*
 
-| 账号 | 密码 | 角色 |
-|---|---|---|
-| `demo_emp` / `demo_emp2` | `employee123` | EMPLOYEE |
-| `demo_sup` | `support123` | SUPPORT |
-| `demo_admin` | `admin12345` | ADMIN |
+- 直接描述现象，不必先想“标题/分类/优先级”；
+- AI 追问缺失信息（发生时间、影响范围、报错文字、已尝试操作），不编造事实；
+- 草稿只填入表单，**不会自动提交**；员工确认后才创建工单；
+- 模型不可用、超时或未配置 Key 时，自动降级为规则草稿，报障流程不中断。
 
-### 忘记密码与强制改密
+### 2. 工单协作：公开回复、内部备注、附件与时限
 
-1. 管理员在右上角「个人资料」填写手机号/邮箱；登录页「忘记密码？」每次打开都会实时拉取**启用中管理员**的联系方式，降权或禁用后自动消失。
-2. 员工联系管理员后，管理员在「用户管理 → 重置密码」生成一次性临时密码。该密码只在弹窗里展示一次，对方已有会话立即失效。
-3. 员工用临时密码登录后只能进入 `/change-password`；服务端同时拦截其他 `/api/**`，改完密码才能正常使用。
+[![工单协作：公开回复、内部备注、附件、处理时限与时间线](docs/screenshots/ticket-detail.png)](docs/screenshots/ticket-detail.png)
 
----
+*图 3：工单详情。员工可见公开回复，内部备注仅技术支持/管理员可见。*
 
-## 接口一览
+- **公开回复**与**内部备注**分栏展示，避免把内部判断发给报障人；
+- 附件受控下载，支持截图、日志与 PDF（单文件 ≤ 5 MB，单工单 ≤ 20 个）；
+- 首次响应/解决时限按优先级计算，等待员工补充时暂停计时；
+- 接单、指派、转派、请求补充、解决、重开都有操作记录；
+- 管理员可按技能与在办量获得分派建议，确认后才生效。
 
-统一响应：`{"code": 0, "message": "OK", "data": ...}`，HTTP 状态码保留 2xx/400/401/403/404/409/429/500 语义。
+### 3. 知识审核：把解决经验变成可复核的知识
 
-共 **69** 个 `/api` 接口。完整清单由 `ApiInventoryTest` 与 `src/test/resources/api-endpoints.txt` 逐行守护。下表保留原有接口，新增加的协作、AI、分派和知识审核接口见 [升级接口说明](docs/service-desk-upgrade.md#新增接口)，管理员 AI 配置及用量接口见 [管理接口](docs/ai-admin.md#管理接口)。
+[![知识审核：适用环境、处理步骤、复核日期与人工发布](docs/screenshots/knowledge-review.png)](docs/screenshots/knowledge-review.png)
 
-| 模块 | 方法 | 路径 | 权限 |
-|---|---|---|---|
-| 认证 | POST | `/api/auth/register` | 公开 |
-| 认证 | POST | `/api/auth/login` | 公开（失败 5 次锁 15 分钟） |
-| 认证 | POST | `/api/auth/logout` | 登录 |
-| 认证 | GET | `/api/auth/me` | 登录 |
-| 认证 | GET | `/api/auth/admin-contacts` | 公开（仅启用管理员） |
-| 认证 | PUT | `/api/auth/me/contact` | 登录（仅改自己） |
-| 认证 | POST | `/api/auth/change-password` | 登录 |
-| 工单 | POST | `/api/tickets`（可选头 `Idempotency-Key`） | 登录 |
-| 工单 | GET | `/api/tickets?page=&size=&status=&category=&keyword=` | 登录（员工仅自己） |
-| 工单 | GET | `/api/tickets/{id}` | 登录（资源级校验） |
-| 工单 | GET | `/api/tickets/stats/{status}` | 登录 |
-| 工单 | POST | `/api/tickets/{id}/claim` | SUPPORT |
-| 工单 | POST | `/api/tickets/{id}/assign` | ADMIN |
-| 工单 | PATCH | `/api/tickets/{id}/status` | 处理人/创建者/ADMIN |
-| 工单 | GET | `/api/tickets/{id}/operations` | 登录（资源级校验） |
-| 知识库 | GET | `/api/kb/categories` | 登录 |
-| 知识库 | POST | `/api/kb/categories` | ADMIN |
-| 知识库 | GET | `/api/kb/items?categoryId=&page=&size=` | 登录 |
-| 知识库 | POST | `/api/kb/items` | SUPPORT / ADMIN |
-| 知识库 | GET | `/api/kb/items/{id}` | 登录 |
-| 知识库 | PUT | `/api/kb/items/{id}` | 创建者 / ADMIN |
-| 知识库 | DELETE | `/api/kb/items/{id}` | 创建者 / ADMIN |
-| 知识库 | GET | `/api/kb/search?q=&page=&size=` | 登录 |
-| AI | POST | `/api/ai/chat` | 登录（超过配额 429，消息带剩余秒数） |
-| 站内信 | GET | `/api/notifications?limit=` | 登录（仅自己） |
-| 站内信 | GET | `/api/notifications/unread-count` | 登录（仅自己） |
-| 站内信 | PATCH | `/api/notifications/{id}/read` | 登录（仅自己，别人的返回 404） |
-| 站内信 | POST | `/api/notifications/read-all` | 登录（仅自己） |
-| 用户管理 | GET | `/api/admin/users` | ADMIN |
-| 用户管理 | PATCH | `/api/admin/users/{id}/status` | ADMIN |
-| 用户管理 | PATCH | `/api/admin/users/{id}/role` | ADMIN |
-| 用户管理 | POST | `/api/admin/users/{id}/password/reset` | ADMIN（不能重置自己） |
+*图 4：知识草稿审核。来源工单、适用环境、复核日期与发布动作在同一屏。*
+
+- 从已解决工单生成**独立草稿**，草稿不会直接进入员工可见的知识库；
+- 审核人补充适用环境、处理步骤、验证方法与下次复核日期；
+- 人工点击「审核并发布」后才对员工可见；
+- 支持版本冲突保护、并发发布幂等、条目有效性反馈；超过复核日期的知识会向 AI 与用户提示先确认环境。
+
+### 4. 管理员：多供应商 AI，可控可计量
+
+[![AI 配置：多供应商、掩码 Key、配置版本、测试与切换](docs/screenshots/ai-config.png)](docs/screenshots/ai-config.png)
+
+*图 5：AI 供应商配置。Key 只显示末四位，保存为待启用版本，测试通过后才能切换。*
+
+[![AI 用量：调用趋势、用户分布、分币种费用与不完整用量提示](docs/screenshots/ai-usage.png)](docs/screenshots/ai-usage.png)
+
+*图 6：AI 用量与费用（演示环境；用量为标注的模拟台账数据）。*
+
+- 支持 DeepSeek、通义千问、OpenAI 与自定义兼容服务；
+- Key 加密保存、界面只显示末四位；保存只产生“待启用版本”，测试通过后人工切换；
+- 调用量、实际上游请求、Token、用户分布与按币种费用估算；
+- 明确标出“用量未知/不完整”，不会把缺失 Token 当成零消耗；
+- DeepSeek 可刷新官方账户余额；其他供应商提供账务入口。
+
+### 5. 工作台：先处理该处理的
+
+- 按角色展示待办队列：待接单、分配给我、即将超时、已经超时（员工侧为待我补充/待我确认）；
+- 最近工单、首次响应与解决平均用时、填写用时、重开率；
+- 管理员额外看到人员负荷、擅长分类与在办工单数。
 
 ---
 
-## 可观测性
+## 可靠性与边界
 
-指标端点单独开在 **8082**（只绑 `127.0.0.1`），8081 完全不暴露 actuator，业务接口的鉴权规则与 SPA 白名单都不用改：
+### 人工确认，AI 不越权
 
-```bash
-curl http://127.0.0.1:8082/actuator/health
-curl http://127.0.0.1:8082/actuator/prometheus | findstr isd_
-```
+AI 只读工单与知识，工具签名不接收 `userId`，身份一律取自 `SecurityContext`；草稿、回复建议都只填入表单，**创建、回复、改状态必须由人提交**。
 
-| 指标 | 类型 | 标签 | 回答什么 |
-|---|---|---|---|
-| `http_server_requests_seconds` | Timer（Starter 自带） | uri/method/status/outcome | 全站 P95、5xx 率；uri 是模板路径，基数安全 |
-| `isd_ai_chat_seconds` | Timer | result = success/timeout/error/empty/not_configured | AI 慢不慢、降级多不多 |
-| `isd_ai_tool_calls_seconds` | Timer | tool × result = success/empty/error | 工具层失败率——框架会吞掉工具异常，端到端指标看不出来 |
-| `isd_ai_retrieval_total` | Counter | result = hit/miss/error | RAG 召回命中率：长期偏低说明缺语料或分词不对，不是模型不会答 |
-| `isd_ticket_transitions_total` | Counter | action/from/to | 状态机流量画像 |
-| `isd_ticket_conflicts_total` | Counter | action = CLAIM/ASSIGN/STATUS | 乐观锁冲突，证明并发保护真的在工作 |
-| `isd_ticket_idempotent_replays_total` | Counter | action = CREATE_TICKET | 幂等重放次数：不为 0 说明前端重试/重复点击真实发生 |
-| `isd_auth_login_total` | Counter | result = success/bad_credentials/disabled/locked | 登录失败率、撞库与被锁定的信号 |
-| `isd_auth_session_revoked_total` | Counter | reason = password_reset/password_changed | 踢人是否生效 |
-| `isd_auth_forbidden_total` | Counter | layer = url/method/resource | 越权探测 |
-| `isd_sessions_started_total` | Counter | 无 | 新建会话数（SessionCreatedEvent） |
-| `isd_sessions_ended_total` | Counter | reason = deleted/expired | 结束的会话数；在线数在查询侧用 started - ended 推导 |
-| `isd_ai_executor_*` | Gauge | 无 | AI 线程池队列长度与活跃线程 |
+### 权限隔离在服务端
 
-两条口径约定：**比率一律在查询侧算**（冲突率 = `conflicts / (transitions + conflicts)`），不存比率；**标签只放有限枚举**，用户名、工单号只进日志。
+三角色 RBAC（EMPLOYEE / SUPPORT / ADMIN）+ 资源级校验。前端隐藏按钮只是体验，越权请求由 Service 拒绝；员工访问他人资源返回 404，避免枚举。
 
-> 为什么没有 `isd_sessions_active` 这个 Gauge：会话存在 Redis，进程内没有可枚举的 SessionRegistry
-> （Spring Session 的 `getAllPrincipals()` 直接抛 `UnsupportedOperationException`），要拿精确值只能
-> `SCAN` 全键空间，那是在指标抓取路径上做 O(N) 阻塞。改成 started/ended 两个累计量后，
-> 在线数在 Prometheus 侧算差值即可。**已知误差**：`reason=expired` 依赖 Redis keyspace 事件通知
-> （`notify-keyspace-events Egx`，compose 文件已开），没开时过期不会产生事件，差值会偏高。
+### Key 加密与主密钥
 
-日志全部带 `traceId`：请求带 `X-Request-Id` 就沿用，没带就生成 8 位并回写响应头。AI 调用跑在 `ai-call-*` 线程池里，`TaskDecorator` 会把 MDC 与 SecurityContext 一并带过去，所以一次对话的 Controller → Service → Mapper → 模型调用可以按同一个 id 串起来。
+后台保存的供应商 Key 使用 AES-GCM 加密，主密钥来自 `ISD_AI_MASTER_KEY` 或持久卷中的 `master.key`，不会打进日志或前端。**备份时必须同时保存数据库和主密钥**，否则恢复后 Key 无法解密。
 
----
+### 异常降级
 
-## 项目结构
+模型超时（30s 硬超时）、返回非法 JSON、未配置 Key、供应商不可用时，AI 统一降级为知识库/规则建议，接口仍返回 200，工单与知识库功能不受影响。
 
-```
-src/main/java/com/isd/
-├── IsdApplication.java
-├── common/
-│   ├── config/        SecurityConfig（过滤器链）、OpenApiConfig、AiConfig（线程池 + ChatClient）
-│   ├── metrics/       IsdMetrics（业务指标唯一出口）、MetricsConfig（活跃会话 Gauge）
-│   ├── exception/     BusinessException、ErrorCode、GlobalExceptionHandler
-│   ├── result/        ApiResponse、PageResponse
-│   └── web/           PingController、SpaForwardController（history 路由回退）
-├── auth/              模块 A：entity / mapper / dto / security / service / controller
-├── ticket/            模块 B：entity / domain（状态机）/ mapper / dto / service / controller
-├── kb/                模块 C：entity / mapper / dto / service / controller
-└── ai/                模块 D：client（LLM 适配器）/ tools（只读工具）/ service / controller / dto
+### 审计与通知
 
-src/main/resources/
-├── db/migration/      Flyway 迁移脚本（V1–V6；改结构就新增 V7）
-├── db/bootstrap.sql   只建库（可选，日常用 createDatabaseIfNotExist）
-└── static/            前端构建产物（npm run build 生成，已 git 忽略）
+工单操作、AI 问答、AI 用量都有独立记录；站内信用 Transactional Outbox，业务变更与事件同事务落库，异步投递且幂等，失败重试有上限。
 
-.github/workflows/ci.yml   后端 verify + 前端 lint/test/audit + 镜像 + E2E + 压测冒烟
-.github/dependabot.yml     maven / npm / actions / docker 每周升级（最多 3 个 PR）
-mvnw / mvnw.cmd / .mvn/    Maven Wrapper，锁定 Maven 3.9.16，免装 Maven
-.gitattributes             行尾策略：文本 LF、cmd CRLF，避免 wrapper 在 Linux 上坏掉
-Dockerfile                 三阶段：Node 构建前端 → Maven 打包 → JRE 运行（非 root + HEALTHCHECK）
-docker-compose*.yml        dev（仅 Redis）/ stack（全栈）/ prod（+ Nginx TLS 反代）
-deploy/                    nginx.conf + 站点配置 + 自签证书生成脚本（证书本身 git 忽略）
-perf/k6/                   k6 压测脚本：工单读路径、AI 降级与配额（CI 冒烟跑同一套阈值）
+### 备份、升级与回滚
 
-web/                   前端工程（独立 npm 包，构建产物回灌 src/main/resources/static）
-├── vite.config.js     /api 代理到 8081；outDir 指向后端 static
-├── vitest.config.js   单测配置（jsdom + Vue Test Utils，与构建配置解耦）
-├── playwright.config.js  E2E 配置（https + ignoreHTTPSErrors + 单 worker + trace）
-├── e2e/               seed.sql（固定 BCrypt 哈希）+ 主流程用例 + 登录/登出辅助
-├── tests/             请求拦截器、会话、回跳、通知、AI 草稿／引用与知识发布交互测试
-├── src/api/           axios 实例（解包 data、统一 401/403/409）
-├── src/router/        history 模式 + 登录守卫 + 角色路由
-├── src/stores/        会话用户（只存身份，不存 token）
-├── src/layouts/       深色侧栏 + 顶栏 + AI 入口
-└── src/views/         登录、修改密码（全屏）、工作台、工单列表/详情/新建、知识库、用户管理
-```
+- 备份 = 数据库（含附件）+ AI 主密钥；
+- v1.0.0 → v1.1.0 会自动执行 V7–V13 迁移，升级前必须备份，步骤见 [升级到 v1.1.0](docs/upgrade.md)；
+- 回滚以配套备份恢复为准，不手工删表降级；
+- 生产安全基线（CSP/HSTS/Secure Cookie/CSRF）与排障见 [部署与运维](docs/operations.md)。
 
-分层职责：Controller 只做路由与参数校验；Service 承担业务规则、事务边界、状态机与权限；Mapper 只写 SQL；前端只做展示与交互，权限判断一律以后端为准。
+### 可核验的工程门禁
+
+CI 五个并行 job 全绿才算通过：后端 207 个用例 + JaCoCo 行覆盖门禁、前端 lint/37 单测/构建/依赖审计、镜像构建、真实浏览器 E2E、k6 冒烟压测。数字以 [关键数字](#关键数字) 为唯一事实源，CI 会比对 `@Test` 数量。
+
+### 明确的边界
+
+- 列表检索仍是 `LIKE '%kw%'`，数据量大时需换全文/搜索引擎；
+- RAG 用 FULLTEXT ngram，暂无语义召回；
+- AI 限流是固定窗口，窗口边界可能瞬时放行接近两倍配额；
+- 处理时限按连续自然小时，不含工作日/节假日日历；
+- 附件存数据库，容量与备份体积随附件增长；
+- CSP 只在生产 profile 启用，`style-src` 保留 `'unsafe-inline'` 兼容 Element Plus；
+- OWASP dependency-check 尚未接入，Java 传递依赖的 CVE 靠 Dependabot 提醒；
+- 会话与 AI 配额强依赖 Redis，Redis 故障时应用拒绝启动（刻意不降级）。
 
 ---
 
-## 关键设计
+## 文档导航
 
-细节与取舍见 [docs/architecture.md](docs/architecture.md)，这里只列结论：
+| 文档 | 内容 |
+|---|---|
+| [部署与运维](docs/operations.md) | 生产 compose、TLS、安全基线、备份恢复、指标与容量 |
+| [开发与本地运行](docs/development.md) | 环境、迁移、前端构建、测试矩阵、项目结构、排错 |
+| [接口一览](docs/api.md) | 统一响应、69 个接口摘要、Swagger |
+| [AI 配置与用量](docs/ai-admin.md) | 多供应商、Key 轮换、测试/切换、用量与余额边界 |
+| [升级到 v1.1.0](docs/upgrade.md) | V7–V13 迁移、备份、验证与回滚 |
+| [架构与取舍](docs/architecture.md) | 模块化单体、Session、Outbox、CSP、E2E 等 ADR |
+| [发布门禁](docs/release-checklist.md) | 十条 DoD，逐条命令与证据 |
+| [v1.1.0 发布说明](docs/release-notes-v1.1.0.md) | 本版亮点、附件、升级与验证结果 |
+| [压测报告](docs/perf-report.md) | k6 吞吐、p95、限流验证与瓶颈分析 |
+| [演示脚本](docs/demo-script.md) | 5 分钟演示路线与实测结果 |
 
-| 主题 | 选择 | 一句话理由 |
-|---|---|---|
-| 架构 | 模块化单体 | 单人开发，微服务只会把精力耗在运维上；按业务分包保留拆分能力 |
-| 认证 | Session（非 JWT） | 单体无多端诉求，注销即失效、可服务端踢人，不用自己实现吊销 |
-| 会话存储 | Spring Session + Redis（`repository-type: indexed`） | 内存 SessionRegistry 只能踢本机会话；索引版仓库按 principal name 找会话，多实例下踢人才成立 |
-| 持久层 | MyBatis（非 JPA） | 已学索引/事务/MVCC，手写 SQL 能直接利用并看执行计划 |
-| 状态机 | 枚举 + 迁移白名单 | 4 个状态不引框架，规则集中、可穷举测试 |
-| 并发控制 | 乐观锁 `version` | 接单是短事务且冲突可重试，比悲观锁划算 |
-| 检索 | 两条路径：列表页 `LIKE '%kw%'`、RAG 用 FULLTEXT ngram | 全文检索查不出单字符，直接替换会让现有搜索退化；所以是增量而不是替换 |
-| 创建幂等 | `Idempotency-Key` + 唯一索引 `uk_creator_idempotency` | 先查后插在并发下仍会双写，唯一索引才是最终裁判；冲突后返回已有记录 |
-| 登录防爆破 | Redis 计数：账号 5 次 / IP 20 次，锁 15 分钟 | 账号维度是主防线（换 IP 也挡得住）；IP 阈值放宽，避免 NAT 后误伤同事 |
-| AI | 只读工具 + 身份取自 SecurityContext | 工具签名不带 userId，从根上堵死提示注入越权 |
-| RAG | 先全文召回 top-3，再拼进 user 消息 | 让模型基于内部术语作答；不塞进 system 提示词，避免动态内容污染行为约束 |
-| AI 审计 | 每次问答落 `ai_chat_log` | 记录召回条数、工具调用次数、耗时、来源；写入失败只 WARN，绝不影响回答 |
-| 前端形态 | Vue SPA + history 路由 | URL 可读（`/tickets/12`）；代价是后端维护显式白名单转发，不用 `/**` 通配以免吞掉 `/api` |
-| 前后端联调 | Vite 代理 `/api` → 8081 | 浏览器只看到一个源，Session Cookie 天然同源，Spring 侧零 CORS 配置 |
-| 权限边界 | 前端隐藏按钮 ≠ 权限 | 可见性由 Service 的 `requireVisible` / `requireRole` 决定，前端裁剪只是减少误点 |
-| 管理端并发 | `version` 条件更新 + 管理员行锁 | 同一行覆盖用乐观锁；两个管理员互降导致 0 管理员，用按 id 排序的跨行锁兜底 |
-| 密码重置 | 一次性临时密码 + 服务端强制改密 | 明文只在响应里出现一次；`SessionRevoker` 按登录名删 Redis 会话；未改密时 `/api/**` 只放行改密、me、logout、管理员联系方式 |
-| 通知 | Transactional Outbox + 站内信 | 事件与业务变更同事务落库，调度器异步投递；多实例靠 `uk_event_user` 幂等，不引 MQ 与分布式锁 |
-| 前端消息 | 轮询未读数（30s）+ 点开拉列表 | 通知不是聊天，长连接/SSE 的收益抵不上运维成本；页面不可见时跳过轮询 |
-| AI 成本护栏 | Redis 固定窗口，用户 20/min + IP 60/min | 每次对话按 token 计费，没配额等于对刷接口敞开；固定窗口的边界误差换实现简单，对"防成本失控"足够 |
-| 数据保留 | 每日 03:30 分批 `DELETE ... LIMIT` | 只删已读通知、`SENT` 事件、超期审计；单批 1000 行避免长事务锁表，积压靠次日消化 |
-| 缓存 / MQ / 微服务 | 不做 | 没有真实业务收益，堆技术名词在面试里是负资产 |
+### 技术栈
+
+| 层 | 选择 |
+|---|---|
+| 后端 | Java 21 · Spring Boot 3.5 · Spring Security · MyBatis · Flyway |
+| 数据 | MySQL 8（业务 + 附件）· Redis 7（会话 + 限流） |
+| AI | Spring AI · DeepSeek / 通义千问 / OpenAI / 自定义兼容服务 · RAG + 只读工具 |
+| 前端 | Vue 3 · Vite · Element Plus · Pinia · Tailwind |
+| 交付 | 三阶段 Dockerfile · Docker Compose · Nginx TLS |
+| 质量 | JUnit 5 · Testcontainers · Vitest · Playwright · k6 · GitHub Actions |
+
+### 贡献
+
+- 提交前跑：`./mvnw verify`、`cd web && npm run lint && npm test && npm run build`；
+- 提交信息沿用 Conventional Commits（`feat(ticket): ...`、`fix(web): ...`）；
+- 新功能请附测试；涉及接口变更时同步 `src/test/resources/api-endpoints.txt`；
+- 安全问题请通过 Issue 私下联系维护者，不要公开贴可利用细节。
+
+### License
+
+[MIT](LICENSE) © 2026 adfkj2
 
 ---
 
 ## 关键数字
 
-本表是仓库内所有数字的**唯一事实源**，其他文档（架构、面试问答、压测报告、发布清单）只引用不复制；
-CI 会统计 `@Test` 数量并与这里的「后端用例」比对，不一致即失败。
+本表是仓库内所有数字的**唯一事实源**，其他文档只引用不复制；CI 会统计 `@Test` 数量并与这里的「后端用例」比对，不一致即失败。
 
 | 项 | 数字 |
 |---|---|
 | 后端用例 | 207 |
 | 前端单测 | 37 |
-| JaCoCo 行覆盖 | 94.39%（门禁 ≥ 90%） |
+| JaCoCo 行覆盖 | 94.50%（门禁 ≥ 90%） |
 | `/api` 接口 | 69 |
 | Flyway 迁移 | 13 |
 | 业务表 | 24 |
 | 浏览器 E2E | 10（2 条真实服务流程 + 8 条模拟接口流程） |
-
----
-
-## 测试
-
-```bash
-./mvnw test      # 只跑测试（Windows 上敲 .\mvnw.cmd test）
-./mvnw verify    # 测试 + 覆盖率报告与门禁（报告在 target/site/jacoco/index.html）
-```
-
-覆盖率门禁：JaCoCo **行覆盖 ≥ 90%**，不达标 `./mvnw verify` 直接失败，最新实测见上方关键数字，报告随 CI 产物可下载。
-
-另有性能验证：k6 脚本压工单读路径与 AI 配额，阈值写死在脚本里（列表 p95 < 300ms、详情 p95 < 200ms、AI 5xx == 0），跑不过即失败。实测数据与瓶颈分析见 [docs/perf-report.md](docs/perf-report.md)；CI 里以 5 VU / 5s 冒烟跑同一套阈值。
-
-浏览器 E2E 打 `docker-compose.prod.yml`（https + Nginx，Secure Cookie 只在该栈下成立）：
-
-```bash
-docker compose -f docker-compose.prod.yml up -d --build
-docker compose -f docker-compose.prod.yml exec -T mysql mysql -uroot -p123456 isd < web/e2e/seed.sql
-cd web && npx playwright install --with-deps chromium && npx playwright test
-```
-
-真实服务测试覆盖登录 → 建单 → 接单 → 解决 → 关闭，以及智能草稿确认、回复／附件、内部隔离、待补充恢复、重开和知识审核发布。另有四条模拟接口浏览器场景验证引用跳转、版本与窄屏布局；失败保留 trace。
-
-`web/e2e/seed.sql` 显式声明 UTF-8，避免容器内默认 latin1 客户端把中文演示数据导入为乱码。
-
-| 测试类 | 用例数 | 覆盖内容 |
-|---|---|---|
-| `TicketApiTest` | 12 | 创建/详情/分页/统计、参数校验、401/404/405/415 |
-| `TicketWorkflowTest` | 12 | 状态机全流程、审计日志、越权 403/404、指派、筛选分页 |
-| `TicketConcurrencyTest` | 1 | 双线程同时接单：恰好一个成功，`version` 只加 1 |
-| `TicketIdempotencyTest` | 5 | 同 key 重复提交只落一条、无 key 保持旧行为、跨用户互不影响、超长 key 400、并发同 key 唯一索引兜底 |
-| `AuthFlowTest` | 13 | 注册登录注销、密码错误、禁用账号、ADMIN 接口权限、调整角色、最后一个管理员保护 |
-| `PasswordFlowTest` | 6 | 重置密码、旧会话失效、临时密码强制改密、强制改密态的退出/联系方式、公开联系方式、清空联系方式校验 |
-| `LoginRateLimitTest` | 3 | 连错 5 次锁定（第 6 次正确密码也 429）、成功登录清零计数、IP 维度独立锁定 |
-| `UserRoleConcurrencyTest` | 2 | 并发改同一用户角色（version 只加 1）、过期 version 更新被拒 |
-| `SchemaMigrationTest` | 1 | Flyway 已应用 V1~V13、全部业务表与关键索引齐全 |
-| `ApiInventoryTest` | 1 | `/api` 路由清单与快照逐行比对，接口增删未同步文档时 CI 失败 |
-| `NotificationApiTest` | 7 | 本人通知、已读、越权、降权后旧指派／超时通知隔离 |
-| `NotificationRelayTest` | 2 | 同一事件重复投递只落一条（唯一索引兜底）、坏 payload 重试到上限转 `FAILED` |
-| `TraceIdFilterTest` | 3 | traceId 生成、合法值透传、非法/超长值丢弃 |
-| `MetricsApiTest` | 1 | 登录失败与 URL 级越权各计一次数（差值断言） |
-| `AiRateLimitTest` | 3 | 用户维度第 3 次 429 且不触发模型调用、IP 维度独立拦截、关闭开关后放行 |
-| `DataRetentionTest` | 4 | 过期 AI 审计／会话及消息、已投递事件、已读通知清理；未过期及未消费内容保留 |
-| `KbApiTest` | 7 | 分类/条目 CRUD、归属权限、检索、通配符转义、OpenAPI 可达 |
-| `AiAgentTest` | 5 | 模型正常/异常/空回答降级、参数校验、未登录 |
-| `AiNotConfiguredTest` | 1 | 未配置 Key 时直接降级，且不发起模型调用（`verifyNoInteractions`） |
-| `AiTimeoutTest` | 1 | 模型超时触发降级 |
-| `AiToolsTest` | 4 | 工具只返回本人数据、未登录即失败、状态过滤 |
-| `AiRagTest` | 5 | 召回与工具来源可追溯、适用环境／复核提示、审计字段与实际分支一致 |
-| `SessionRedisTest` | 2 | 会话真的落在 Redis、重置密码删光该账号全部会话、本人改密只保留当前会话 |
-| `CsrfProtectionTest` | 6 | 首个 GET 即下发 `XSRF-TOKEN`、缺 token 403、Cookie 与头不一致 403、只读不受影响、带 token 的注册→登录→建单全链路 |
-| `SecurityHeadersTest` | 3 | CSP 开启后下发且不含 `unsafe-eval`、样式保留 `unsafe-inline`、默认（开发期）不下发 |
-| `TicketCollaborationServiceTest` | 21 | 协作权限、时限暂停、附件限制、转派、分派理由、提醒去重与 UTC 宿主回归 |
-| `TicketCollaborationApiTest` | 5 | 真实数据库下的回复／内部隔离、附件下载、补充／重开、队列及提醒事件 |
-| `AiWorkspaceApiTest` | 11 | 多轮与角色隔离、上下文权限、缺失信息追问、无效 JSON、采纳率口径及无隐式写入 |
-| `AiSuggestionAuditTest` | 3 | 建议统计标记的审计失败、并发失败及空审计 ID 边界 |
-| `AgentSnippetTest` | 4 | 长文相关片段、引用去重与上下文清理、知识复核元数据 |
-| `KnowledgeWorkflowTest` | 7 | 草稿隔离、生成期间重开、旧待审草稿、版本冲突、并发重复发布与反馈 |
-| `AccessChangeSessionTest` / `UserAccessChangeTransactionTest` | 6 | 真实 Cookie／Redis 权限失效、旧高权限 AI 会话隔离、提交／回滚与幂等 |
-| `BusinessTimeTest` | 1 | 业务时间不随宿主默认时区变化 |
-
-新增协作、AI 会话与结构化建议、知识审核、时区和权限失效回归；用例总数见上方关键数字。并发用例刻意不加 `@Transactional`——事务是连接级的，两个线程各自提交才能测出真实冲突；指标断言使用差值，避免上下文复用造成干扰。
-
-> `AiRagTest` 也不能加 `@Transactional`：InnoDB 的全文索引在行提交后才进入检索视图，
-> 测试事务里的种子数据永远查不到，会得到"召回永远为空"的假阴性。改为 `itest-` 前缀 + `@AfterEach` 手工清理。
-
-测试依赖有两种来源（见 `AbstractIntegrationTest`）：本机有 Docker 就启 `mysql:8.0.36` + `redis:7.4-alpine` 两个容器，Flyway 建表、Ryuk 回收；没有 Docker 则回退连本机 MySQL80（读 `application-local.yml`）与本机 Redis 6379。想强制走本机服务，设环境变量 `ISD_TEST_NO_DOCKER=true`。
-
-> 会话外置后，测试里不能再强转 `MockHttpSession`（拿到的是 Spring Session 的包装类），统一走
-> `TestSessions` 工具：登录后取 `SESSION` Cookie，后续请求带 Cookie——顺带覆盖了 Cookie 下发这一步。
-
-CI 在 `.github/workflows/ci.yml`，五个 job 都是硬门禁（相互并行，任一失败即红）：
-
-- **后端**：`./mvnw verify`（runner 自带 Docker，固定走容器模式），覆盖编译、全部回归、JaCoCo 门禁与打包；随后统计 `@Test` 数与关键数字比对，报告作为 CI 产物上传；
-- **前端**：`npm ci` → `npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org` → `npm run lint` → `npm test` → `npm run build`；
-- **镜像**：`docker build`（不推送），专门拦住「只在本地机器能构建」的退化——缺文件、依赖本机 `static/`、忘写 `.dockerignore` 都会在这一步暴露；
-- **E2E**：生成自签证书 → `docker compose -f docker-compose.prod.yml up -d --build` → 灌 `web/e2e/seed.sql` → Playwright Chromium 跑主流程；报告与 trace 无论成败都上传；
-- **压测**：起 `docker-compose.stack.yml` → `grafana/k6` 跑工单读路径与 AI 配额冒烟（5 VU / 5s），阈值与完整压测完全一致，跑不过即失败。
-
-依赖升级由 `.github/dependabot.yml` 覆盖 maven / npm / actions / docker，每周最多 3 个 PR，走同一套门禁。
-
----
-
-## 已知限制
-
-- 列表页检索仍是 `LIKE '%kw%'`（无法走索引）；RAG 召回已换 FULLTEXT ngram，但没有语义召回（同义词、跨语言查不到）
-- 知识库分类不支持改/删，条目为硬删除
-- AI 会话保留最近十条消息；语义召回尚未引入。真实回答质量仍需结合企业知识与用户反馈持续评估，自动化测试使用可重复的模拟模型结果
-- AI 限流是固定窗口：窗口边界可能瞬时放行接近两倍配额（换来实现与排查的简单）；配额按节点共享 Redis，Redis 故障时 AI 接口会随会话一起不可用
-- 登录限流按 IP 20 次的阈值对 NAT 环境偏严，企业出口 IP 集中时要按实际调大或改成网关注入的可信头
-- 幂等键只在"同一用户 + 同一 key"下生效，key 由前端页面生成，没有做服务端过期回收（靠唯一索引长期占用存储可忽略的空间）
-- CSRF 用 Cookie 双提交（`XSRF-TOKEN` + `X-XSRF-TOKEN`）：token 必须可被 JS 读取（不能设 HttpOnly），因此一旦出现 XSS，CSRF 这层就失效——兜底靠 CSP 与输出转义。CSP 只在 prod profile 下发（开发期 Vite HMR / Swagger UI 需要 eval 与内联脚本），且 `style-src` 保留 `'unsafe-inline'` 以兼容 Element Plus 弹层定位；`script-src` 仍是 `'self'`
-- 工单号仍是"日期 + 4 位随机数 + 重试"，未换雪花/序列
-- 处理时限使用连续自然小时，暂不支持工作日／节假日日历；分派依据分类技能与在办量推荐，用户确认后生效
-- 附件存入数据库，每个不超过 5 MB，每张工单最多 20 个，备份与容量管理需包含附件数据
-- Element Plus 全量引入（主包 gzip 约 410KB），内网可接受；按需引入留作优化项
-- CI 压测是 5 VU / 5s 冒烟（约 1 分钟），只缩小并发、时长与种子数据量，阈值与完整压测一致；完整报告仍需本地按 `docs/perf-report.md` 复现
-- 依赖风险靠 Dependabot + `npm audit --audit-level=high`：OWASP dependency-check 未接入（需要 NVD API Key，首跑十分钟以上），Java 侧传递依赖的 CVE 暂时只能靠人工看 Dependabot
-- 会话强依赖 Redis：Redis 不可用时应用启动失败（刻意不做内存降级）；Redis 侧需要开启 keyspace 事件通知才能统计 `reason=expired`
-- 每次请求多一次 Redis 往返（Lettuce 连接复用，通常亚毫秒），换来多实例部署下的会话一致性；未做会话本地缓存，避免「缓存未失效导致踢人不生效」
-
----
-
-## 文档
-
-- [docs/ai-admin.md](docs/ai-admin.md) 管理员 AI 配置、用量、官方余额与密钥备份恢复
-- [docs/service-desk-upgrade.md](docs/service-desk-upgrade.md) 工单协作、智能报障、处理助手、时限与知识审核使用说明
-- [docs/release-checklist.md](docs/release-checklist.md) v1.0 发布门禁（十条 DoD，逐条命令与证据）
-- [docs/architecture.md](docs/architecture.md) 架构与关键取舍（ADR）
-- [docs/demo-script.md](docs/demo-script.md) 5 分钟演示脚本（含实测结果）
-- [docs/interview-qa.md](docs/interview-qa.md) 面试问答速查 + 简历描述
-- [docs/learning-notes.md](docs/learning-notes.md) 学习笔记（踩坑记录）
-- [docs/phase0-架构与MVP.md](docs/phase0-架构与MVP.md) Phase 0 需求与规划
-- [docs/perf-report.md](docs/perf-report.md) 压测报告（k6：吞吐、p95、限流验证、瓶颈分析）
-- [perf/README.md](perf/README.md) 压测脚本用法与数据清理

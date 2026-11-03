@@ -1,0 +1,72 @@
+# 隔离演示环境：仅用于 README 截图与演示数据初始化。
+#
+# 与 docker-compose.stack.yml 的区别：
+# - 独立项目名 isd-demo，容器、网络、数据卷全部隔离；
+# - 只绑定 127.0.0.1:18081，不暴露到局域网；
+# - 独立 AI 主密钥卷，演示配置不会污染日常环境。
+#
+#   docker compose -f docker-compose.demo.yml up -d --build
+#   docker compose -f docker-compose.demo.yml down -v   # 清空演示数据
+name: isd-demo
+
+services:
+  mysql:
+    image: mysql:8.0.36
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DEMO_MYSQL_ROOT_PASSWORD:-demo123456}
+      MYSQL_DATABASE: isd
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--notify-keyspace-events", "Egx"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MAVEN_MIRROR_URL: ${MAVEN_MIRROR_URL:-}
+    image: isd:demo
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_URL: "jdbc:mysql://mysql:3306/isd?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
+      DB_USERNAME: root
+      DB_PASSWORD: ${DEMO_MYSQL_ROOT_PASSWORD:-demo123456}
+      REDIS_HOST: redis
+      DEEPSEEK_API_KEY: local-placeholder
+      ISD_AI_MASTER_KEY_FILE: /var/lib/isd/ai/master.key
+      ISD_AI_ALLOWED_ORIGINS: ""
+      TZ: Asia/Shanghai
+    volumes:
+      - ai-secrets:/var/lib/isd/ai
+    ports:
+      - "127.0.0.1:18081:8081"
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  redis-data:
+  ai-secrets:

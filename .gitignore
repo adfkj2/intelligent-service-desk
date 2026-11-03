@@ -37,3 +37,10 @@ deploy/certs/*.p12
 # Playwright E2E artifacts
 web/playwright-report/
 web/test-results/
+
+# Demo screenshot state (generated, only for isd-demo)
+web/e2e/demo/.demo-state.json
+# Release assets (built locally, uploaded to GitHub Release)
+/isd-1.1.0.jar
+/isd-1.1.0-source.zip
+/SHA256SUMS.txt

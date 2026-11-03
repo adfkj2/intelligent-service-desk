@@ -343,7 +343,7 @@ WHERE id=? AND status='OPEN' AND version=?
 - **为什么不用 `storageState` 预登录**：会话 Cookie 是 `Secure + HttpOnly`，走 API 预置要手工拼 CSRF 双提交；三次 UI 登录只多约 6 秒，换来用例可读且更接近真实用户路径。
 - **为什么必须打 prod 栈**：prod 才有 `Secure` Cookie、CSP 与 Nginx；在 `http://localhost:8081` 下浏览器不回传 Secure Cookie，登录会"假失败"，排查方向会完全跑偏。
 - **种子账号**：`web/e2e/seed.sql` 直接写库，固定 BCrypt 哈希（10 轮）与 README 演示账号一致；比"注册接口 + SQL 提权"少两轮跨系统协作，且可重复执行。
-- **CI 证据链**：后端 `verify`（105 用例 + JaCoCo 门禁 + `@Test` 数字守卫）、前端 lint/test/audit/build、镜像构建、E2E、k6 冒烟五个 job 并行；Dependabot 每周提 PR 走同一套门禁。发布时把 CI run、覆盖率报告、压测报告三处链接写进 Release Notes。
+- **CI 证据链**：后端 `verify`（207 用例 + JaCoCo 门禁 + `@Test` 数字守卫）、前端 lint/test/audit/build、镜像构建、E2E、k6 冒烟五个 job 并行；Dependabot 每周提 PR 走同一套门禁。发布时把 CI run、覆盖率报告、压测报告三处链接写进 Release Notes。
 - **代价**：E2E 只覆盖一条主流程，视觉回归与边界页面仍未做；E2E 与镜像 job 各构建一次镜像，用重复构建换 job 间的独立性。
 
 ---

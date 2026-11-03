@@ -37,8 +37,8 @@ export default [
     }
   },
   {
-    // Playwright 配置与 E2E 用例跑在 Node 里（process.env），不是浏览器
-    files: ['playwright.config.js', 'e2e/**/*.js'],
+    // Playwright 配置、E2E 用例与演示脚本跑在 Node 里（process.env），不是浏览器
+    files: ['playwright.config.js', 'e2e/**/*.js', 'e2e/**/*.mjs'],
     languageOptions: {
       globals: {
         ...globals.node

@@ -235,8 +235,23 @@ public class AiWorkspaceService {
         } else {
             steps = List.of("记录完整错误提示、发生时间和已尝试的操作。", "如无法自行定位，可确认草稿后提交工单。");
         }
-        return new TicketDraftResponse(limit(facts.replace('\n', ' '), 128), limit(facts, 2000), category,
+        // 降级时没有模型可做归纳，但仍应给出可读标题：取第一句/第一个逗号前的核心现象，
+        // 而不是把整段描述原样塞进标题，避免标题与正文完全重复。
+        return new TicketDraftResponse(fallbackTitle(facts), limit(facts, 2000), category,
                 "MEDIUM", missingInformation(facts), steps, answer.references(), "FALLBACK", answer.answerId(), conversationId);
+    }
+
+    static String fallbackTitle(String facts) {
+        String first = facts.strip().split("\\R", 2)[0];
+        int cut = first.length();
+        for (String separator : new String[]{"。", "！", "？", "；", "，", ","}) {
+            int index = first.indexOf(separator);
+            if (index > 6 && index < cut) {
+                cut = index;
+            }
+        }
+        String title = first.substring(0, cut).strip();
+        return limit(title.length() < 8 ? first : title, 128);
     }
 
     static List<String> missingInformation(String facts) {
