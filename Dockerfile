@@ -39,7 +39,7 @@ COPY --from=frontend /build/src/main/resources/static ./src/main/resources/stati
 RUN mvn -B -ntp -Dmaven.test.skip=true package
 
 # ---------- 3. 运行时 ----------
-FROM eclipse-temurin:21-jre-alpine AS runtime
+FROM eclipse-temurin:24-jre-alpine AS runtime
 
 ENV TZ=Asia/Shanghai
 # 非 root 运行：容器内被攻破时，攻击者拿到的不是 root
