@@ -10,5 +10,12 @@ export const kbApi = {
   updateItem: (id, data) => request.put(`/kb/items/${id}`, data),
   deleteItem: (id) => request.delete(`/kb/items/${id}`),
   // params: { q, page, size }
-  search: (params) => request.get('/kb/search', { params })
+  search: (params) => request.get('/kb/search', { params }),
+  drafts: () => request.get('/kb/drafts'),
+  draftFromTicket: (data) => request.post('/kb/drafts/from-ticket', data),
+  updateDraft: (id, data) => request.patch(`/kb/drafts/${id}`, data),
+  publishDraft: (id, data) => request.post(`/kb/drafts/${id}/publish`, data),
+  feedbackSummary: (id) => request.get(`/kb/items/${id}/feedback`),
+  feedback: (id, helpful) => request.post(`/kb/items/${id}/feedback`, { helpful }),
+  review: (id, data) => request.post(`/kb/items/${id}/review`, data)
 }

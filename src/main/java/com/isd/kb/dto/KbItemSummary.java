@@ -14,11 +14,16 @@ public record KbItemSummary(
         String title,
         String tags,
         Long createdBy,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        String environment,
+        LocalDateTime reviewDueAt,
+        Long reviewedBy,
+        Long sourceTicketId
 ) {
 
     public static KbItemSummary from(KbItem item) {
         return new KbItemSummary(item.getId(), item.getCategoryId(), item.getCategoryName(),
-                item.getTitle(), item.getTags(), item.getCreatedBy(), item.getUpdatedAt());
+                item.getTitle(), item.getTags(), item.getCreatedBy(), item.getUpdatedAt(),
+                item.getEnvironment(), item.getReviewDueAt(), item.getReviewedBy(), item.getSourceTicketId());
     }
 }

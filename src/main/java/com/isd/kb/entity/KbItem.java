@@ -19,6 +19,19 @@ public class KbItem {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private String categoryName;
+    private String environment;
+    private LocalDateTime reviewDueAt;
+    private Long reviewedBy;
+    private Long sourceTicketId;
+
+    public String getEnvironment() { return environment; }
+    public void setEnvironment(String value) { environment = value; }
+    public LocalDateTime getReviewDueAt() { return reviewDueAt; }
+    public void setReviewDueAt(LocalDateTime value) { reviewDueAt = value; }
+    public Long getReviewedBy() { return reviewedBy; }
+    public void setReviewedBy(Long value) { reviewedBy = value; }
+    public Long getSourceTicketId() { return sourceTicketId; }
+    public void setSourceTicketId(Long value) { sourceTicketId = value; }
 
     public Long getId() {
         return id;

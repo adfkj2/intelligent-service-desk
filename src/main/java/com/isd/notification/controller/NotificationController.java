@@ -35,25 +35,25 @@ public class NotificationController {
 
     @GetMapping
     public ApiResponse<List<NotificationResponse>> list(@RequestParam(defaultValue = "20") int limit) {
-        return ApiResponse.ok(notificationService.list(currentUserProvider.requireId(), limit));
+        return ApiResponse.ok(notificationService.list(currentUserProvider.require(), limit));
     }
 
     /** 路径是单段，和 /{id}/read 的两段模板不会冲突 */
     @GetMapping("/unread-count")
     public ApiResponse<UnreadCount> unreadCount() {
-        return ApiResponse.ok(new UnreadCount(notificationService.countUnread(currentUserProvider.requireId())));
+        return ApiResponse.ok(new UnreadCount(notificationService.countUnread(currentUserProvider.require())));
     }
 
     /** 不存在或不属于当前用户，Service 都抛 404（不区分两者，避免探测） */
     @PatchMapping("/{id}/read")
     public ApiResponse<Void> markRead(@PathVariable Long id) {
-        notificationService.markRead(id, currentUserProvider.requireId());
+        notificationService.markRead(id, currentUserProvider.require());
         return ApiResponse.ok();
     }
 
     @PostMapping("/read-all")
     public ApiResponse<ReadAllResult> markAllRead() {
-        return ApiResponse.ok(new ReadAllResult(notificationService.markAllRead(currentUserProvider.requireId())));
+        return ApiResponse.ok(new ReadAllResult(notificationService.markAllRead(currentUserProvider.require())));
     }
 
     public record UnreadCount(long count) {

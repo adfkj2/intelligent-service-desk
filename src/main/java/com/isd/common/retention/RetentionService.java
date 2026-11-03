@@ -3,7 +3,9 @@ package com.isd.common.retention;
 import java.time.LocalDateTime;
 
 import com.isd.ai.mapper.AiChatLogMapper;
+import com.isd.ai.mapper.AiConversationMapper;
 import com.isd.common.metrics.IsdMetrics;
+import com.isd.common.time.BusinessTime;
 import com.isd.notification.mapper.NotificationMapper;
 import com.isd.notification.mapper.OutboxEventMapper;
 import org.slf4j.Logger;
@@ -32,10 +34,12 @@ public class RetentionService {
     private static final Logger log = LoggerFactory.getLogger(RetentionService.class);
 
     public static final String TARGET_AI_CHAT_LOG = "ai_chat_log";
+    public static final String TARGET_AI_CONVERSATION = "ai_conversation";
     public static final String TARGET_OUTBOX_EVENT = "outbox_event";
     public static final String TARGET_NOTIFICATION = "notification";
 
     private final AiChatLogMapper aiChatLogMapper;
+    private final AiConversationMapper conversationMapper;
     private final OutboxEventMapper outboxEventMapper;
     private final NotificationMapper notificationMapper;
     private final IsdMetrics metrics;
@@ -46,6 +50,7 @@ public class RetentionService {
     private final int notificationReadDays;
 
     public RetentionService(AiChatLogMapper aiChatLogMapper,
+                            AiConversationMapper conversationMapper,
                             OutboxEventMapper outboxEventMapper,
                             NotificationMapper notificationMapper,
                             IsdMetrics metrics,
@@ -55,6 +60,7 @@ public class RetentionService {
                             @Value("${isd.retention.outbox-sent-days:30}") int outboxSentDays,
                             @Value("${isd.retention.notification-read-days:90}") int notificationReadDays) {
         this.aiChatLogMapper = aiChatLogMapper;
+        this.conversationMapper = conversationMapper;
         this.outboxEventMapper = outboxEventMapper;
         this.notificationMapper = notificationMapper;
         this.metrics = metrics;
@@ -69,9 +75,9 @@ public class RetentionService {
      * 每轮清理的结果，同时用于日志与测试断言。
      * 用 record 而不是返回 void：测试要验证"哪张表被删了多少"，日志也要能对上。
      */
-    public record CleanupResult(int aiChatLogs, int outboxEvents, int notifications) {
+    public record CleanupResult(int aiChatLogs, int outboxEvents, int notifications, int aiConversations) {
         public int total() {
-            return aiChatLogs + outboxEvents + notifications;
+            return aiChatLogs + outboxEvents + notifications + aiConversations;
         }
     }
 
@@ -80,14 +86,16 @@ public class RetentionService {
      * （否则跑得慢的时候，后面的目标会用到更晚的 now，边界悄悄漂移几秒）。
      */
     public CleanupResult cleanupAll() {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = BusinessTime.now();
         int aiChatLogs = cleanup(TARGET_AI_CHAT_LOG, cutoff(now, aiLogDays),
                 (cutoff, limit) -> aiChatLogMapper.deleteBefore(cutoff, limit));
+        int conversations = cleanup(TARGET_AI_CONVERSATION, cutoff(now, aiLogDays),
+                (cutoff, limit) -> conversationMapper.deleteBefore(cutoff, limit));
         int outboxEvents = cleanup(TARGET_OUTBOX_EVENT, cutoff(now, outboxSentDays),
                 (cutoff, limit) -> outboxEventMapper.deleteSentBefore(cutoff, limit));
         int notifications = cleanup(TARGET_NOTIFICATION, cutoff(now, notificationReadDays),
                 (cutoff, limit) -> notificationMapper.deleteReadBefore(cutoff, limit));
-        return new CleanupResult(aiChatLogs, outboxEvents, notifications);
+        return new CleanupResult(aiChatLogs, outboxEvents, notifications, conversations);
     }
 
     private int cleanup(String target, LocalDateTime cutoff, BatchDelete delete) {

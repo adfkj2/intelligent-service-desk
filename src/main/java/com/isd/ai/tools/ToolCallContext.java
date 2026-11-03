@@ -1,6 +1,8 @@
 package com.isd.ai.tools;
 
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Map;
+import com.isd.ai.dto.KnowledgeReference;
 
 /**
  * 统计"一次对话里模型调了几次工具"，用于审计表 ai_chat_log.tool_calls。
@@ -14,22 +16,37 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class ToolCallContext {
 
     private static final ThreadLocal<AtomicInteger> CURRENT = new ThreadLocal<>();
+    private static final ThreadLocal<Map<Long, KnowledgeReference>> REFERENCES = new ThreadLocal<>();
 
     private ToolCallContext() {
     }
 
     public static void bind(AtomicInteger counter) {
         CURRENT.set(counter);
+        REFERENCES.remove();
+    }
+
+    public static void bind(AtomicInteger counter, Map<Long, KnowledgeReference> references) {
+        CURRENT.set(counter);
+        REFERENCES.set(references);
     }
 
     public static void clear() {
         CURRENT.remove();
+        REFERENCES.remove();
     }
 
     public static void increment() {
         AtomicInteger counter = CURRENT.get();
         if (counter != null) {
             counter.incrementAndGet();
+        }
+    }
+
+    public static void reference(KnowledgeReference reference) {
+        Map<Long, KnowledgeReference> references = REFERENCES.get();
+        if (references != null && reference.id() != null && references.size() < 10) {
+            references.putIfAbsent(reference.id(), reference);
         }
     }
 }

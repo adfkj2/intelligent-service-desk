@@ -22,10 +22,39 @@ public class Ticket {
     private Integer version;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private String creatorName;
+    private String assigneeName;
+    private LocalDateTime firstResponseAt;
+    private LocalDateTime resolvedAt;
+    private LocalDateTime responseDueAt;
+    private LocalDateTime resolutionDueAt;
+    private LocalDateTime waitingSince;
+    private Long pausedSeconds;
+    private Integer reopenCount;
+    private Integer fillDurationSeconds;
 
-    public Long getId() {
-        return id;
-    }
+    public String getCreatorName() { return creatorName; }
+    public void setCreatorName(String value) { this.creatorName = value; }
+    public String getAssigneeName() { return assigneeName; }
+    public void setAssigneeName(String value) { this.assigneeName = value; }
+    public LocalDateTime getFirstResponseAt() { return firstResponseAt; }
+    public void setFirstResponseAt(LocalDateTime value) { this.firstResponseAt = value; }
+    public LocalDateTime getResolvedAt() { return resolvedAt; }
+    public void setResolvedAt(LocalDateTime value) { this.resolvedAt = value; }
+    public LocalDateTime getResponseDueAt() { return responseDueAt; }
+    public void setResponseDueAt(LocalDateTime value) { this.responseDueAt = value; }
+    public LocalDateTime getResolutionDueAt() { return resolutionDueAt; }
+    public void setResolutionDueAt(LocalDateTime value) { this.resolutionDueAt = value; }
+    public LocalDateTime getWaitingSince() { return waitingSince; }
+    public void setWaitingSince(LocalDateTime value) { this.waitingSince = value; }
+    public Long getPausedSeconds() { return pausedSeconds; }
+    public void setPausedSeconds(Long value) { this.pausedSeconds = value; }
+    public Integer getReopenCount() { return reopenCount; }
+    public void setReopenCount(Integer value) { this.reopenCount = value; }
+    public Integer getFillDurationSeconds() { return fillDurationSeconds; }
+    public void setFillDurationSeconds(Integer value) { this.fillDurationSeconds = value; }
+
+    public Long getId() { return id; }
 
     public void setId(Long id) {
         this.id = id;

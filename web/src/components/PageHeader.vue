@@ -6,7 +6,7 @@ defineProps({
 </script>
 
 <template>
-  <div class="mb-5 flex items-start justify-between gap-4">
+  <div class="mb-5 flex flex-col items-start justify-between gap-3 sm:flex-row sm:gap-4">
     <div>
       <h1 class="m-0 text-[20px] font-semibold leading-7 text-ink-900">{{ title }}</h1>
       <p v-if="description" class="mt-1 mb-0 text-[13px] text-ink-600">{{ description }}</p>

@@ -5,6 +5,7 @@
 export const TICKET_STATUS = {
   OPEN: { label: '待接单', type: 'primary', color: '#2563EB' },
   IN_PROGRESS: { label: '处理中', type: 'warning', color: '#F59E0B' },
+  WAITING_CUSTOMER: { label: '待补充信息', type: 'warning', color: '#B45309' },
   RESOLVED: { label: '已解决', type: 'success', color: '#10B981' },
   CLOSED: { label: '已关闭', type: 'info', color: '#9CA3AF' }
 }
@@ -44,7 +45,15 @@ export const ACTION_LABEL = {
   CLAIM: '接单',
   ASSIGN: '指派',
   RESOLVE: '标记解决',
-  CLOSE: '确认关闭'
+  CLOSE: '确认关闭',
+  REQUEST_INFO: '请求补充信息',
+  PROVIDE_INFO: '已补充信息',
+  REOPEN: '重新处理',
+  TRANSFER: '转派',
+  REPLY: '回复',
+  ATTACHMENT: '添加附件',
+  INTERNAL_NOTE: '内部备注',
+  INTERNAL_ATTACHMENT: '内部附件'
 }
 
 export const ROLE_LABEL = {

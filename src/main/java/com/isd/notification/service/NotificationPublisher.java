@@ -78,6 +78,30 @@ public class NotificationPublisher {
                         truncate(content, CONTENT_MAX_LENGTH), List.of(ticket.getAssigneeId())));
     }
 
+    public void publishTicketReply(Ticket ticket, LoginUser operator, boolean internal) {
+        // Internal notes never produce employee notifications, including after a later role change.
+        if (internal) return;
+        List<Long> recipients = recipients(ticket.getCreatorId(),ticket.getAssigneeId(),operator.getId());
+        if (recipients.isEmpty()) return;
+        publish("TICKET_REPLY",ticket.getId(),new TicketNotificationPayload(ticket.getId(),"工单有新回复",
+                truncate("工单 " + ticket.getTicketNo() + "《" + ticket.getTitle()
+                        + "》有新回复，请查看详情。",CONTENT_MAX_LENGTH),recipients));
+    }
+
+    public void publishTicketSla(Ticket ticket, String kind, boolean overdue, List<Long> adminIds) {
+        Set<Long> ids = new LinkedHashSet<>();
+        if (ticket.getAssigneeId() != null) ids.add(ticket.getAssigneeId());
+        if (overdue || ids.isEmpty()) ids.addAll(adminIds);
+        if (ids.isEmpty()) return;
+        String target = "RESPONSE".equals(kind) ? "首次响应" : "解决";
+        String title = overdue ? "工单处理已超时" : "工单即将超时";
+        String content = "工单 " + ticket.getTicketNo() + "《" + ticket.getTitle() + "》的"
+                + target + "时限" + (overdue ? "已超过" : "将在一小时内到达") + "，请及时处理。";
+        publish(overdue ? "SLA_BREACH" : "SLA_DUE_SOON",ticket.getId(),
+                new TicketNotificationPayload(ticket.getId(),title,truncate(content,CONTENT_MAX_LENGTH),
+                        new ArrayList<>(ids)));
+    }
+
     private void publish(String eventType, Long ticketId, TicketNotificationPayload payload) {
         OutboxEvent event = new OutboxEvent();
         event.setEventType(eventType);
@@ -111,6 +135,7 @@ public class NotificationPublisher {
         return switch (status) {
             case "OPEN" -> "待接单";
             case "IN_PROGRESS" -> "处理中";
+            case "WAITING_CUSTOMER" -> "待补充信息";
             case "RESOLVED" -> "已解决";
             case "CLOSED" -> "已关闭";
             default -> status;

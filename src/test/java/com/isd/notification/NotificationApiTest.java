@@ -114,6 +114,58 @@ class NotificationApiTest extends AbstractIntegrationTest {
         assertThat(readFlagOf(othersId)).isZero();
     }
 
+    @Test
+    @DisplayName("技术支持降为员工后，原指派和新时限通知均按当前工单范围过滤")
+    void demotedStaffCannotReadOrMarkNotificationsForOtherEmployeesTickets() throws Exception {
+        long myTicket = insertTicket(ME.getId(), "本人的工单");
+        long formerAssignment = insertTicket(OTHER.getId(), "其他员工的机密工单");
+        long hidden = insertNotification(ME.getId(), formerAssignment, "原指派的机密标题", "TICKET_ASSIGNED", 0);
+        long hiddenSla = insertNotification(ME.getId(), formerAssignment, "降权后继续产生的超时标题", "SLA_BREACH", 0);
+        insertNotification(ME.getId(), myTicket, "本人工单有回复", "TICKET_REPLY", 0);
+        insertNotification(ME.getId(), "普通站内通知", "与工单无关的本人通知", 0);
+        LoginUser beforeDemotion = TestUsers.support(ME.getId());
+
+        mockMvc.perform(get("/api/notifications").with(user(beforeDemotion)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(4));
+        mockMvc.perform(get("/api/notifications/unread-count").with(user(beforeDemotion)))
+                .andExpect(jsonPath("$.data.count").value(4));
+
+        // The stale assignee ID remains on the ticket, but the new employee role cannot see it.
+        mockMvc.perform(get("/api/notifications").with(user(ME)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].title").value("普通站内通知"))
+                .andExpect(jsonPath("$.data[1].title").value("本人工单有回复"));
+        mockMvc.perform(get("/api/notifications/unread-count").with(user(ME)))
+                .andExpect(jsonPath("$.data.count").value(2));
+        mockMvc.perform(patch("/api/notifications/{id}/read", hidden).with(user(ME)))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value(40400));
+        mockMvc.perform(patch("/api/notifications/{id}/read", hiddenSla).with(user(ME)))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/notifications/read-all").with(user(ME)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.updated").value(2));
+        assertThat(readFlagOf(hidden)).isZero();
+        assertThat(readFlagOf(hiddenSla)).isZero();
+        mockMvc.perform(get("/api/notifications/unread-count").with(user(ME)))
+                .andExpect(jsonPath("$.data.count").value(0));
+        mockMvc.perform(get("/api/notifications/unread-count").with(user(beforeDemotion)))
+                .andExpect(jsonPath("$.data.count").value(2));
+    }
+
+    @Test
+    @DisplayName("关联工单不存在的历史通知不向员工暴露，技术支持仍只能操作本人通知")
+    void unavailableTicketNotificationsAreHiddenFromEmployeesAndStaffCannotReadOthers() throws Exception {
+        long inaccessible = insertNotification(ME.getId(), Long.MAX_VALUE, "不可访问的历史标题", "TICKET_STATUS_CHANGED", 0);
+        mockMvc.perform(get("/api/notifications").with(user(ME)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(0));
+        mockMvc.perform(get("/api/notifications/unread-count").with(user(ME)))
+                .andExpect(jsonPath("$.data.count").value(0));
+        mockMvc.perform(patch("/api/notifications/{id}/read", inaccessible).with(user(TestUsers.support(OTHER.getId()))))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/notifications/read-all").with(user(TestUsers.admin(OTHER.getId()))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.updated").value(0));
+        assertThat(readFlagOf(inaccessible)).isZero();
+    }
+
     /**
      * 直接落库造数据：通知由调度器异步产生，接口测试不该依赖那条链路（它有自己的测试）。
      * event_id 留空——唯一索引 uk_event_user 对 NULL 不去重，正好允许这里反复插入。
@@ -126,6 +178,24 @@ class NotificationApiTest extends AbstractIntegrationTest {
         return Objects.requireNonNull(jdbcTemplate.queryForObject(
                 "SELECT MAX(id) FROM notification WHERE user_id = ? AND title = ?", Long.class, userId, title),
                 "通知未落库");
+    }
+
+    private long insertNotification(Long userId, Long ticketId, String title, String type, int readFlag) {
+        jdbcTemplate.update("""
+                INSERT INTO notification (user_id, ticket_id, type, title, content, read_flag, event_id)
+                VALUES (?, ?, ?, ?, '资源范围回归', ?, NULL)
+                """, userId, ticketId, type, title, readFlag);
+        return Objects.requireNonNull(jdbcTemplate.queryForObject(
+                "SELECT MAX(id) FROM notification WHERE user_id = ? AND title = ?", Long.class, userId, title));
+    }
+
+    private long insertTicket(Long creatorId, String title) {
+        String no = "N" + java.util.UUID.randomUUID().toString().substring(0, 20);
+        jdbcTemplate.update("""
+                INSERT INTO ticket(ticket_no,title,category,priority,status,creator_id,assignee_id)
+                VALUES (?,?,'IT_FAULT','MEDIUM','IN_PROGRESS',?,?)
+                """, no, title, creatorId, ME.getId());
+        return Objects.requireNonNull(jdbcTemplate.queryForObject("SELECT id FROM ticket WHERE ticket_no=?", Long.class, no));
     }
 
     private int readFlagOf(long id) {

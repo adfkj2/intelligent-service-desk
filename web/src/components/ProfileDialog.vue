@@ -2,8 +2,9 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { authApi } from '../api/auth'
+import { ticketApi } from '../api/ticket'
 import { useUserStore } from '../stores/user'
-import { ROLE_LABEL, ROLE_TAG_TYPE } from '../constants/ticket'
+import { CATEGORY_OPTIONS, ROLE_LABEL, ROLE_TAG_TYPE } from '../constants/ticket'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false }
@@ -13,6 +14,8 @@ const emit = defineEmits(['update:modelValue'])
 const store = useUserStore()
 const saving = ref(false)
 const form = reactive({ phone: '', email: '' })
+const skills = ref([])
+const skillsSaving = ref(false)
 
 const visible = computed({
   get: () => props.modelValue,
@@ -21,14 +24,28 @@ const visible = computed({
 
 watch(
   () => props.modelValue,
-  (open) => {
+  async (open) => {
     if (!open) {
       return
     }
     form.phone = store.user?.phone || ''
     form.email = store.user?.email || ''
+    if (store.isSupport) {
+      try {
+        const supports = await ticketApi.supportOptions()
+        skills.value = supports.find(item => item.userId === store.userId)?.skills || []
+      } catch (error) { console.error('加载技能分类失败', error) }
+    }
   }
 )
+
+async function saveSkills() {
+  if (skillsSaving.value) return
+  skillsSaving.value = true
+  try { await ticketApi.saveSkills(skills.value); ElMessage.success('擅长分类已保存') }
+  catch (error) { console.error('保存技能分类失败', error) }
+  finally { skillsSaving.value = false }
+}
 
 function validate() {
   const phone = form.phone.trim()
@@ -68,7 +85,7 @@ async function save() {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="个人资料" width="460px">
+  <el-dialog v-model="visible" title="个人资料" width="min(480px, 94vw)">
     <div class="rounded-lg border border-line bg-canvas/70 px-3.5 py-3">
       <div class="flex items-center justify-between">
         <span class="text-[12px] text-ink-400">用户名</span>
@@ -95,6 +112,13 @@ async function save() {
       手机号与邮箱会展示在登录页的“忘记密码”弹窗中，仅对启用中的管理员生效。
       <span v-if="store.isAdmin">管理员至少需要填写一项。</span>
     </p>
+
+    <section v-if="store.isSupport" class="mt-5 border-t border-line pt-4">
+      <h3 class="m-0 text-[13px] font-medium">擅长处理的分类</h3>
+      <p class="text-xs leading-5 text-ink-600">用于推荐合适的处理人，可选择多个分类。</p>
+      <el-checkbox-group v-model="skills"><el-checkbox v-for="item in CATEGORY_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</el-checkbox></el-checkbox-group>
+      <el-button class="mt-3" size="small" :loading="skillsSaving" @click="saveSkills">保存擅长分类</el-button>
+    </section>
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>

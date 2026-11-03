@@ -13,12 +13,17 @@ public record KbItemResponse(
         String tags,
         Long createdBy,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        String environment,
+        LocalDateTime reviewDueAt,
+        Long reviewedBy,
+        Long sourceTicketId
 ) {
 
     public static KbItemResponse from(KbItem item) {
         return new KbItemResponse(item.getId(), item.getCategoryId(), item.getCategoryName(),
                 item.getTitle(), item.getContent(), item.getTags(), item.getCreatedBy(),
-                item.getCreatedAt(), item.getUpdatedAt());
+                item.getCreatedAt(), item.getUpdatedAt(), item.getEnvironment(), item.getReviewDueAt(),
+                item.getReviewedBy(), item.getSourceTicketId());
     }
 }

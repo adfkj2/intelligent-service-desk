@@ -24,16 +24,18 @@ class SchemaMigrationTest extends AbstractIntegrationTest {
     @DisplayName("Flyway 已应用全部迁移：业务表、幂等键、全文索引、AI 审计表、发件箱、清理索引都在")
     void schemaIsMigrated() {
         Integer applied = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM flyway_schema_history WHERE version IN ('1','2','3','4','5','6') AND success = 1",
+                "SELECT COUNT(*) FROM flyway_schema_history WHERE version IN ('1','2','3','4','5','6','7','8','9','10','11') AND success = 1",
                 Integer.class);
-        assertThat(applied).isEqualTo(6);
+        assertThat(applied).isEqualTo(11);
 
         List<String> tables = jdbcTemplate.queryForList(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()",
                 String.class);
         assertThat(tables).contains(
                 "sys_user", "ticket", "ticket_operation_log", "kb_category", "kb_item",
-                "ai_chat_log", "outbox_event", "notification", "flyway_schema_history");
+                "ai_chat_log", "outbox_event", "notification", "flyway_schema_history",
+                "ticket_reply", "ticket_attachment", "ticket_support_profile", "ticket_sla_reminder",
+                "ai_conversation", "ai_conversation_message", "ai_answer_feedback", "kb_draft", "kb_feedback");
 
         List<String> userColumns = jdbcTemplate.queryForList(
                 "SELECT column_name FROM information_schema.columns "
@@ -46,7 +48,8 @@ class SchemaMigrationTest extends AbstractIntegrationTest {
                 "SELECT column_name FROM information_schema.columns "
                         + "WHERE table_schema = DATABASE() AND table_name = 'ticket'",
                 String.class);
-        assertThat(ticketColumns).contains("idempotency_key");
+        assertThat(ticketColumns).contains("idempotency_key", "first_response_at", "resolved_at",
+                "response_due_at", "resolution_due_at", "waiting_since", "paused_seconds", "reopen_count", "fill_duration_seconds");
         Integer idempotencyIndex = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.statistics "
                         + "WHERE table_schema = DATABASE() AND table_name = 'ticket' "

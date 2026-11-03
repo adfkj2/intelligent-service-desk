@@ -1,6 +1,6 @@
 <script setup>
-import { computed, ref } from 'vue'
-import { RouterView, useRoute, useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { BookOpen, ClipboardList, LayoutDashboard, LogOut, Sparkles, User, Users } from 'lucide-vue-next'
 import { useUserStore } from '../stores/user'
 import { ROLE_LABEL, ROLE_TAG_TYPE } from '../constants/ticket'
@@ -13,6 +13,10 @@ const router = useRouter()
 const store = useUserStore()
 const aiVisible = ref(false)
 const profileVisible = ref(false)
+const aiTicketId = computed(() => route.name === 'ticket-detail' ? Number(route.params.id) : null)
+function openAi() { aiVisible.value = true }
+onMounted(() => window.addEventListener('isd:open-ai', openAi))
+onBeforeUnmount(() => window.removeEventListener('isd:open-ai', openAi))
 
 const menus = computed(() => {
   const items = [
@@ -58,7 +62,7 @@ function handleCommand(command) {
 
 <template>
   <div class="flex h-screen overflow-hidden bg-canvas">
-    <aside class="flex w-[220px] shrink-0 flex-col bg-[#111827]">
+    <aside class="hidden w-[190px] shrink-0 flex-col bg-[#111827] md:flex xl:w-[220px]">
       <div class="flex h-14 items-center gap-2.5 border-b border-white/5 px-5">
         <div class="flex h-7 w-7 items-center justify-center rounded-md bg-brand-600 text-[13px] font-semibold text-white">
           IS
@@ -99,12 +103,12 @@ function handleCommand(command) {
           <Sparkles :size="14" class="text-brand-500" />
           试试 AI 助手
         </button>
-        <p class="m-0 mt-2 text-[10px] text-gray-600">v1.0 · Spring Boot 3.5</p>
+        <p class="m-0 mt-2 text-[11px] text-gray-500">让每一次报障都有回应</p>
       </div>
     </aside>
 
     <div class="flex min-w-0 flex-1 flex-col">
-      <header class="flex h-14 shrink-0 items-center justify-between border-b border-line bg-white px-6">
+      <header class="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-line bg-white px-4 sm:px-6">
         <div class="flex items-center gap-2 text-[13px]">
           <span class="text-ink-400">ISD</span>
           <span class="text-ink-400">/</span>
@@ -124,7 +128,7 @@ function handleCommand(command) {
               >
                 {{ store.displayName.slice(0, 1) }}
               </span>
-              {{ store.displayName }}
+              <span class="hidden sm:inline">{{ store.displayName }}</span>
               <el-icon class="text-ink-400"><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
@@ -143,7 +147,11 @@ function handleCommand(command) {
         </div>
       </header>
 
-      <main class="flex-1 overflow-y-auto px-6 py-6">
+      <nav class="flex shrink-0 gap-1 overflow-x-auto border-b border-line bg-white px-3 py-2 md:hidden" aria-label="主导航">
+        <router-link v-for="item in menus" :key="item.name" :to="{ name: item.name }" class="shrink-0 rounded px-3 py-2 text-xs" :class="activeName === item.name ? 'bg-brand-50 font-medium text-brand-700' : 'text-ink-600'">{{ item.label }}</router-link>
+      </nav>
+
+      <main class="flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6">
         <div class="mx-auto w-full max-w-[1400px]">
           <router-view v-slot="{ Component }">
             <transition name="page-fade" mode="out-in">
@@ -163,7 +171,7 @@ function handleCommand(command) {
       <Sparkles :size="20" />
     </button>
 
-    <AiDrawer v-model="aiVisible" />
+    <AiDrawer v-model="aiVisible" :ticket-id="aiTicketId" />
     <ProfileDialog v-model="profileVisible" />
   </div>
 </template>

@@ -2,11 +2,14 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from 'lucide-vue-next'
+import { useRoute } from 'vue-router'
 import PageHeader from '../components/PageHeader.vue'
+import KnowledgeDrafts from '../components/KnowledgeDrafts.vue'
 import { kbApi } from '../api/kb'
 import { useUserStore } from '../stores/user'
 
 const store = useUserStore()
+const route = useRoute()
 
 const loading = ref(false)
 const categories = ref([])
@@ -22,6 +25,10 @@ const form = reactive({ categoryId: null, title: '', content: '', tags: '' })
 
 const detailVisible = ref(false)
 const detail = ref(null)
+const feedback = ref({ helpful: 0, unhelpful: 0, myFeedback: null })
+const feedbackSaving = ref(false)
+const review = reactive({ environment: '', reviewDueAt: '' })
+const reviewSaving = ref(false)
 
 const categoryVisible = ref(false)
 const categoryForm = reactive({ name: '', description: '' })
@@ -59,7 +66,10 @@ async function loadItems() {
 onMounted(async () => {
   await loadCategories()
   await loadItems()
+  if (route.query.itemId) await openDetail({ id: Number(route.query.itemId) })
 })
+
+watch(() => route.query.itemId, (id) => { if (id) openDetail({ id: Number(id) }) })
 
 let debounceTimer = null
 watch(
@@ -106,11 +116,35 @@ async function openEdit(row) {
 async function openDetail(row) {
   try {
     detail.value = await kbApi.item(row.id)
+    Object.assign(review, { environment: detail.value.environment || '', reviewDueAt: detail.value.reviewDueAt || '' })
+    feedback.value = { helpful: 0, unhelpful: 0, myFeedback: null }
     detailVisible.value = true
+    feedback.value = await kbApi.feedbackSummary(row.id)
   } catch (error) {
     console.error('加载条目失败', error)
   }
 }
+
+async function submitFeedback(helpful) {
+  if (feedbackSaving.value) return
+  feedbackSaving.value = true
+  try { await kbApi.feedback(detail.value.id, helpful); feedback.value = await kbApi.feedbackSummary(detail.value.id) }
+  catch (error) { console.error('保存知识反馈失败', error) }
+  finally { feedbackSaving.value = false }
+}
+
+async function saveReview() {
+  if (reviewSaving.value) return
+  reviewSaving.value = true
+  try {
+    detail.value = await kbApi.review(detail.value.id, { environment: review.environment, reviewDueAt: review.reviewDueAt || null })
+    ElMessage.success('知识复核已保存')
+    await loadItems()
+  } catch (error) { console.error('知识复核失败', error) }
+  finally { reviewSaving.value = false }
+}
+
+function reviewOverdue(item) { return item.reviewDueAt && new Date(item.reviewDueAt).getTime() < Date.now() }
 
 async function saveItem() {
   if (!form.categoryId) {
@@ -191,8 +225,10 @@ async function createCategory() {
       </template>
     </PageHeader>
 
-    <div class="flex items-start gap-4">
-      <div class="isd-card w-[240px] shrink-0 py-2">
+    <KnowledgeDrafts v-if="canWrite" :categories="categories" :requested-id="route.query.draftId" @published="loadItems" />
+
+    <div class="flex flex-col items-stretch gap-4 lg:flex-row lg:items-start">
+      <div class="isd-card w-full shrink-0 py-2 lg:w-[220px]">
         <button
           type="button"
           class="flex w-full cursor-pointer items-center justify-between px-4 py-2.5 text-[13px] transition"
@@ -243,6 +279,7 @@ async function createCategory() {
               <span v-else class="text-[12px] text-ink-400">—</span>
             </template>
           </el-table-column>
+          <el-table-column label="复核状态" width="110"><template #default="{ row }"><el-tag v-if="reviewOverdue(row)" type="warning" size="small">待复核</el-tag><span v-else class="text-xs text-ink-400">{{ row.reviewDueAt ? '有效期内' : '未设置' }}</span></template></el-table-column>
           <el-table-column prop="updatedAt" label="更新时间" width="170" />
           <el-table-column label="操作" width="140" fixed="right">
             <template #default="{ row }">
@@ -268,7 +305,7 @@ async function createCategory() {
       </div>
     </div>
 
-    <el-drawer v-model="editorVisible" :title="editingId ? '编辑知识条目' : '新建知识条目'" size="520px">
+    <el-drawer v-model="editorVisible" :title="editingId ? '编辑知识条目' : '新建知识条目'" size="min(560px, 100vw)">
       <el-form label-position="top">
         <el-form-item label="分类">
           <el-select v-model="form.categoryId" class="w-full" placeholder="选择分类">
@@ -297,7 +334,7 @@ async function createCategory() {
       </template>
     </el-drawer>
 
-    <el-dialog v-model="detailVisible" :title="detail?.title || '条目详情'" width="640px">
+    <el-dialog v-model="detailVisible" :title="detail?.title || '条目详情'" width="min(720px, 94vw)">
       <div v-if="detail">
         <div class="mb-3 flex flex-wrap items-center gap-2">
           <el-tag size="small" type="info" effect="plain">{{ detail.categoryName }}</el-tag>
@@ -306,11 +343,16 @@ async function createCategory() {
           </el-tag>
         </div>
         <p class="m-0 whitespace-pre-wrap text-[13px] leading-7 text-ink-900">{{ detail.content }}</p>
+        <p v-if="detail.environment" class="mt-4 text-xs text-ink-600">适用环境：{{ detail.environment }}</p>
+        <p v-if="reviewOverdue(detail)" class="text-xs text-amber-800">此条目已到复核日期，使用时请核对当前环境。</p>
+        <router-link v-if="detail.sourceTicketId && store.isStaff" :to="{ name: 'ticket-detail', params: { id: detail.sourceTicketId } }" class="text-xs text-brand-700">查看来源工单 #{{ detail.sourceTicketId }}</router-link>
         <p class="m-0 mt-4 text-[11px] text-ink-400">创建者 用户 {{ detail.createdBy }} · 更新于 {{ detail.updatedAt }}</p>
+        <div class="mt-5 border-t border-line pt-4"><p class="text-[13px] font-medium">这篇知识是否有帮助？</p><div class="flex gap-2"><el-button size="small" :type="feedback.myFeedback === true ? 'primary' : 'default'" :loading="feedbackSaving" @click="submitFeedback(true)">有帮助 {{ feedback.helpful }}</el-button><el-button size="small" :type="feedback.myFeedback === false ? 'warning' : 'default'" :loading="feedbackSaving" @click="submitFeedback(false)">需要改进 {{ feedback.unhelpful }}</el-button></div></div>
+        <div v-if="canWrite && canManage(detail)" class="mt-5 border-t border-line pt-4"><h3 class="text-[13px] font-medium">复核适用性</h3><el-input v-model="review.environment" maxlength="255" placeholder="更新适用环境" /><div class="mt-3 flex flex-wrap gap-2"><el-date-picker v-model="review.reviewDueAt" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" placeholder="下次复核时间" /><el-button :loading="reviewSaving" @click="saveReview">确认复核</el-button></div></div>
       </div>
     </el-dialog>
 
-    <el-dialog v-model="categoryVisible" title="新建分类" width="420px">
+    <el-dialog v-model="categoryVisible" title="新建分类" width="min(420px, 94vw)">
       <el-form label-position="top">
         <el-form-item label="分类名">
           <el-input v-model="categoryForm.name" maxlength="64" placeholder="例如：账号与权限" />

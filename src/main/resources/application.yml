@@ -10,6 +10,10 @@ server:
 spring:
   application:
     name: isd
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
   profiles:
     active: local
   datasource:
@@ -18,6 +22,9 @@ spring:
     url: "${DB_URL:jdbc:mysql://127.0.0.1:3306/isd?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}"
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:}
+    hikari:
+      # DATETIME/NOW() and BusinessTime must share a zone, including UTC database hosts.
+      connection-init-sql: "SET time_zone = '+08:00'"
 
   data:
     redis:

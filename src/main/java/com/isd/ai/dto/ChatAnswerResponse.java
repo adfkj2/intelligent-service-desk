@@ -15,5 +15,13 @@ import java.util.List;
  *                       正常回答时也会带上（用户想深挖可以直接去知识库），
  *                       降级时它就是答案本身的数据来源。
  */
-public record ChatAnswerResponse(String answer, String source, List<String> relatedTitles) {
+public record ChatAnswerResponse(String answer, String source, List<String> relatedTitles,
+                                 String conversationId, Long answerId, List<KnowledgeReference> references) {
+    public ChatAnswerResponse(String answer, String source, List<String> relatedTitles) {
+        this(answer, source, relatedTitles, null, null, List.of());
+    }
+
+    public ChatAnswerResponse withConversation(String id) {
+        return new ChatAnswerResponse(answer, source, relatedTitles, id, answerId, references);
+    }
 }

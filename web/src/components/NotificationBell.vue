@@ -17,7 +17,10 @@ const PAGE_SIZE = 20
 
 const TYPE_LABEL = {
   TICKET_STATUS_CHANGED: '状态变更',
-  TICKET_ASSIGNED: '指派'
+  TICKET_ASSIGNED: '指派',
+  TICKET_REPLY: '新回复',
+  SLA_DUE_SOON: '即将超时',
+  SLA_BREACH: '已超时'
 }
 
 const router = useRouter()

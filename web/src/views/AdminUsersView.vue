@@ -116,7 +116,7 @@ async function submitRole() {
     roleTarget.value.role = updated.role
     roleDialogVisible.value = false
     ElMessage.success(
-      `已将「${updated.username}」调整为${ROLE_LABEL[updated.role] || updated.role}，对方需重新登录后生效`
+      `已将「${updated.username}」调整为${ROLE_LABEL[updated.role] || updated.role}，旧登录已失效，请对方重新登录`
     )
   } catch (error) {
     // 400 非法角色 / 403 非管理员：保留弹窗便于修正
@@ -230,7 +230,7 @@ async function submitRole() {
       </el-radio-group>
 
       <p class="m-0 mt-4 rounded-md bg-canvas px-3 py-2 text-[12px] leading-5 text-ink-600">
-        角色会立即写入数据库，但对方当前会话仍按旧角色运行，需要重新登录才会生效。
+        确认后会立即失效对方的旧登录会话，请对方重新登录后继续使用。
       </p>
 
       <template #footer>

@@ -3,6 +3,8 @@ package com.isd.ticket.dto;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Max;
 
 /**
  * 创建工单的请求体。
@@ -24,6 +26,10 @@ public record CreateTicketRequest(
 
         @Pattern(regexp = "LOW|MEDIUM|HIGH|URGENT",
                 message = "优先级只能是 LOW、MEDIUM、HIGH、URGENT 之一")
-        String priority
+        String priority,
+        @Min(0) @Max(86400) Integer fillDurationSeconds
 ) {
+    public CreateTicketRequest(String title, String description, String category, String priority) {
+        this(title, description, category, priority, null);
+    }
 }

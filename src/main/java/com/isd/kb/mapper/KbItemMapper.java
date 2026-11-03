@@ -29,6 +29,14 @@ import org.apache.ibatis.annotations.Update;
 @Mapper
 public interface KbItemMapper {
 
+    @Update("""
+            UPDATE kb_item SET environment=#{environment},review_due_at=#{reviewDueAt},
+                reviewed_by=#{reviewedBy},source_ticket_id=#{sourceTicketId} WHERE id=#{id}
+            """)
+    int updateReviewMetadata(@Param("id") Long id, @Param("environment") String environment,
+                            @Param("reviewDueAt") java.time.LocalDateTime reviewDueAt,
+                            @Param("reviewedBy") Long reviewedBy, @Param("sourceTicketId") Long sourceTicketId);
+
     @Insert("""
             INSERT INTO kb_item (category_id, title, content, tags, created_by)
             VALUES (#{categoryId}, #{title}, #{content}, #{tags}, #{createdBy})
@@ -38,7 +46,7 @@ public interface KbItemMapper {
 
     @Select("""
             SELECT i.id, i.category_id, i.title, i.content, i.tags, i.created_by, i.created_at, i.updated_at,
-                   c.name AS category_name
+                   c.name AS category_name, i.environment, i.review_due_at, i.reviewed_by, i.source_ticket_id
             FROM kb_item i
             LEFT JOIN kb_category c ON c.id = i.category_id
             WHERE i.id = #{id}
@@ -52,7 +60,7 @@ public interface KbItemMapper {
     @Select("""
             <script>
             SELECT i.id, i.category_id, i.title, i.tags, i.created_by, i.updated_at,
-                   c.name AS category_name
+                   c.name AS category_name, i.environment, i.review_due_at, i.reviewed_by, i.source_ticket_id
             FROM kb_item i
             LEFT JOIN kb_category c ON c.id = i.category_id
             <where>
@@ -93,7 +101,7 @@ public interface KbItemMapper {
      */
     @Select("""
             SELECT i.id, i.category_id, i.title, i.content, i.tags, i.created_by, i.created_at, i.updated_at,
-                   c.name AS category_name
+                   c.name AS category_name, i.environment, i.review_due_at, i.reviewed_by, i.source_ticket_id
             FROM kb_item i
             LEFT JOIN kb_category c ON c.id = i.category_id
             WHERE MATCH(i.title, i.content, i.tags) AGAINST (#{query} IN NATURAL LANGUAGE MODE)
@@ -108,7 +116,7 @@ public interface KbItemMapper {
      */
     @Select("""
             SELECT i.id, i.category_id, i.title, i.content, i.tags, i.created_by, i.created_at, i.updated_at,
-                   c.name AS category_name
+                   c.name AS category_name, i.environment, i.review_due_at, i.reviewed_by, i.source_ticket_id
             FROM kb_item i
             LEFT JOIN kb_category c ON c.id = i.category_id
             WHERE (i.title LIKE #{keyword} OR i.content LIKE #{keyword} OR i.tags LIKE #{keyword})

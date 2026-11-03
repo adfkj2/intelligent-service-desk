@@ -21,6 +21,8 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class UserService {
@@ -194,6 +196,7 @@ public class UserService {
         }
         log.info("状态变更: id={} username={} status {} -> {} (operator={})",
                 targetId, target.getUsername(), target.getStatus(), status, operatorId);
+        if (status == 0) revokeAccessAfterCommit(target.getUsername());
         return UserResponse.from(reload(targetId));
     }
 
@@ -203,8 +206,7 @@ public class UserService {
      * 为什么禁止改自己：把自己降成员工会立刻失去管理入口，属于不可逆的误操作，
      * 与"不能禁用自己"是同一条保护逻辑，需要由另一个管理员来操作。
      *
-     * 注意：角色存在 Session 里，改完不会踢掉对方当前会话，必须重新登录才生效。
-     * 这是 Session 方案的已知行为，前端需要在成功提示里说清楚。
+     * 角色缓存在 Session 中；数据库提交后删除全部旧会话，让所有设备重新登录。
      */
     @Transactional
     public UserResponse updateRole(Long targetId, String roleRaw, Long operatorId) {
@@ -233,7 +235,22 @@ public class UserService {
         }
         log.info("角色变更: id={} username={} {} -> {} (operator={})",
                 targetId, target.getUsername(), target.getRole(), role, operatorId);
+        revokeAccessAfterCommit(target.getUsername());
         return UserResponse.from(reload(targetId));
+    }
+
+    private void revokeAccessAfterCommit(String username) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()
+                && TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    sessionRevoker.revokeAccessChanged(username);
+                }
+            });
+        } else {
+            sessionRevoker.revokeAccessChanged(username);
+        }
     }
 
     /**

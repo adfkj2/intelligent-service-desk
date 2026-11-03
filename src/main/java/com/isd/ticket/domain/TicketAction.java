@@ -19,7 +19,10 @@ public enum TicketAction {
     CLAIM(TicketStatus.OPEN, TicketStatus.IN_PROGRESS),
     ASSIGN(TicketStatus.OPEN, TicketStatus.IN_PROGRESS),
     RESOLVE(TicketStatus.IN_PROGRESS, TicketStatus.RESOLVED),
-    CLOSE(TicketStatus.RESOLVED, TicketStatus.CLOSED);
+    CLOSE(TicketStatus.RESOLVED, TicketStatus.CLOSED),
+    REQUEST_INFO(TicketStatus.IN_PROGRESS, TicketStatus.WAITING_CUSTOMER),
+    PROVIDE_INFO(TicketStatus.WAITING_CUSTOMER, TicketStatus.IN_PROGRESS),
+    REOPEN(TicketStatus.RESOLVED, TicketStatus.IN_PROGRESS);
 
     private final TicketStatus from;
     private final TicketStatus to;

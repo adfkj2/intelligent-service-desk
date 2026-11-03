@@ -20,6 +20,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 /**
  * 全局异常处理：把各类异常统一转换成 ApiResponse 结构，避免把堆栈或框架默认错误页暴露给调用方。
@@ -33,6 +35,18 @@ public class GlobalExceptionHandler {
 
     public GlobalExceptionHandler(IsdMetrics metrics) {
         this.metrics = metrics;
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUploadTooLarge(MaxUploadSizeExceededException ex) {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                .body(ApiResponse.error(ErrorCode.INVALID_PARAM.code(), "附件不能超过 5 MB，请压缩后重试"));
+    }
+
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingPart(MissingServletRequestPartException ex) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.error(ErrorCode.INVALID_PARAM.code(), "请选择需要上传的附件"));
     }
 
     /** 业务规则拒绝，如工单不存在、状态非法迁移 */

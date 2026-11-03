@@ -2,6 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  /* Keep Element Plus styles, while giving native action buttons and links the same baseline. */
+  :where(button) {
+    padding: 0;
+    border-width: 0;
+    border-style: solid;
+    background: transparent;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  :where(a) {
+    color: inherit;
+    text-decoration: none;
+  }
+}
+
 :root {
   /* Element Plus 主色对齐设计稿的克制蓝 */
   --el-color-primary: #2563eb;
@@ -74,4 +91,43 @@ body {
 
 .el-button {
   font-weight: 400;
+}
+
+.isd-text-action {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1d4ed8;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.isd-text-action:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 3px;
+}
+
+.el-dialog {
+  max-width: calc(100vw - 24px);
+}
+
+.ai-drawer .el-drawer__body {
+  padding: 0;
+}
+
+.isd-assistance {
+  border-top: 3px solid #2563eb;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

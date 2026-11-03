@@ -15,3 +15,7 @@ ON DUPLICATE KEY UPDATE password_hash          = VALUES(password_hash),
                         role                   = VALUES(role),
                         status                 = 1,
                         must_change_password   = 0;
+
+INSERT INTO kb_category (name, description)
+VALUES ('E2E 网络与远程办公', '浏览器验收使用的知识分类')
+ON DUPLICATE KEY UPDATE description = VALUES(description);

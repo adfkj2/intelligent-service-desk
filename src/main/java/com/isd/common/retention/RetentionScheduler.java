@@ -27,7 +27,7 @@ public class RetentionScheduler {
         this.retentionService = retentionService;
     }
 
-    @Scheduled(cron = "${isd.retention.cron:0 30 3 * * *}")
+    @Scheduled(cron = "${isd.retention.cron:0 30 3 * * *}", zone = "Asia/Shanghai")
     public void runDailyCleanup() {
         long startNanos = System.nanoTime();
         try {

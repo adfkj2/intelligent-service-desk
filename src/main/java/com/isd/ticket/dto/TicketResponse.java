@@ -19,7 +19,17 @@ public record TicketResponse(
         Long creatorId,
         Long assigneeId,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        String creatorName,
+        String assigneeName,
+        LocalDateTime firstResponseAt,
+        LocalDateTime resolvedAt,
+        LocalDateTime responseDueAt,
+        LocalDateTime resolutionDueAt,
+        LocalDateTime waitingSince,
+        Long pausedSeconds,
+        Integer reopenCount,
+        Integer fillDurationSeconds
 ) {
 
     public static TicketResponse from(Ticket ticket) {
@@ -34,6 +44,9 @@ public record TicketResponse(
                 ticket.getCreatorId(),
                 ticket.getAssigneeId(),
                 ticket.getCreatedAt(),
-                ticket.getUpdatedAt());
+                ticket.getUpdatedAt(), ticket.getCreatorName(), ticket.getAssigneeName(),
+                ticket.getFirstResponseAt(), ticket.getResolvedAt(), ticket.getResponseDueAt(),
+                ticket.getResolutionDueAt(), ticket.getWaitingSince(), ticket.getPausedSeconds(),
+                ticket.getReopenCount(), ticket.getFillDurationSeconds());
     }
 }

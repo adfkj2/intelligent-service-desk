@@ -1,159 +1,95 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowRight, Plus } from 'lucide-vue-next'
+import { Plus } from 'lucide-vue-next'
 import PageHeader from '../components/PageHeader.vue'
 import StatusTag from '../components/StatusTag.vue'
 import PriorityDot from '../components/PriorityDot.vue'
 import { ticketApi } from '../api/ticket'
+import { aiApi } from '../api/ai'
 import { useUserStore } from '../stores/user'
-import { STATUS_OPTIONS, TICKET_STATUS } from '../constants/ticket'
+import { formatDuration } from '../utils/ticket'
+import { TICKET_CATEGORY } from '../constants/ticket'
 
 const store = useUserStore()
 const router = useRouter()
-
 const loading = ref(false)
-const counts = ref({ OPEN: 0, IN_PROGRESS: 0, RESOLVED: 0, CLOSED: 0 })
+const failed = ref(false)
+const overview = ref({ counts: {}, queues: {}, supportWorkloads: [] })
+const metrics = ref(null)
 const recent = ref([])
+const queues = computed(() => store.isStaff ? [
+  { value: 'MINE', label: '分配给我', hint: '我负责的在办工单' },
+  { value: 'UNASSIGNED', label: '待接单', hint: '等待技术支持接手' },
+  { value: 'DUE_SOON', label: '即将超时', hint: '优先安排响应与处理' },
+  { value: 'OVERDUE', label: '已经超时', hint: '需要尽快跟进' }
+] : [
+  { value: 'WAITING_ME', label: '待我补充', hint: '技术支持需要更多信息' },
+  { value: 'CONFIRM', label: '待我确认', hint: '确认解决，或反馈未解决' }
+])
+const rate = (numerator, denominator) => denominator ? `${Math.round(numerator / denominator * 100)}%` : '暂无数据'
 
-// 统计复用列表接口的 total：/stats/{status} 统计的是全库数量，会把公司工单总量暴露给员工
 async function load() {
   loading.value = true
-  try {
-    const [statusCounts, list] = await Promise.all([
-      Promise.all(
-        STATUS_OPTIONS.map((option) =>
-          ticketApi
-            .list({ status: option.value, page: 1, size: 1 })
-            .then((data) => [option.value, data.total])
-        )
-      ),
-      ticketApi.list({ page: 1, size: 6 })
-    ])
-    counts.value = Object.fromEntries(statusCounts)
-    recent.value = list.items
-  } catch (error) {
-    console.error('加载工作台失败', error)
-  } finally {
-    loading.value = false
-  }
+  failed.value = false
+  const results = await Promise.allSettled([ticketApi.overview(), ticketApi.list({ page: 1, size: 6 }), ...(store.isStaff ? [aiApi.metrics()] : [])])
+  if (results[0].status === 'fulfilled') overview.value = results[0].value
+  else failed.value = true
+  if (results[1].status === 'fulfilled') recent.value = results[1].value.items
+  if (results[2]?.status === 'fulfilled') metrics.value = results[2].value
+  loading.value = false
 }
-
 onMounted(load)
-
-const cards = computed(() =>
-  STATUS_OPTIONS.map((option) => ({
-    ...option,
-    color: TICKET_STATUS[option.value].color,
-    count: counts.value[option.value] || 0
-  }))
-)
-
-const scopeHint = computed(() =>
-  store.isStaff ? '全公司在办工单概览' : '仅统计你本人提交的工单'
-)
-
-function openTicket(row) {
-  router.push({ name: 'ticket-detail', params: { id: row.id } })
-}
+function openQueue(queue) { router.push({ name: 'tickets', query: { queue } }) }
 </script>
 
 <template>
-  <div>
-    <PageHeader title="工作台" :description="scopeHint">
-      <template #actions>
-        <el-button type="primary" :icon="Plus" @click="router.push({ name: 'ticket-create' })">
-          新建工单
-        </el-button>
-      </template>
+  <div v-loading="loading">
+    <PageHeader title="工作台" :description="store.isStaff ? '先处理需要你跟进的工单' : '查看你的报障进展和待办事项'">
+      <template #actions><el-button type="primary" :icon="Plus" @click="router.push({ name: 'ticket-create' })">新建工单</el-button></template>
     </PageHeader>
-
-    <div v-loading="loading" class="grid grid-cols-2 gap-4 xl:grid-cols-4">
-      <div v-for="card in cards" :key="card.value" class="isd-card overflow-hidden">
-        <div class="h-[3px] w-full" :style="{ backgroundColor: card.color }" />
-        <div class="px-5 py-4">
-          <p class="m-0 text-[12px] text-ink-600">{{ card.label }}</p>
-          <p class="m-0 mt-2 text-[28px] font-semibold leading-none text-ink-900">{{ card.count }}</p>
-        </div>
+    <p v-if="failed" role="alert" class="text-[13px] text-red-700">暂时无法加载工作台。<button class="isd-text-action" @click="load">重新加载</button></p>
+    <section class="isd-card overflow-hidden" aria-label="待办事项">
+      <div class="border-b border-line px-5 py-4"><h2 class="m-0 text-[15px] font-semibold text-ink-900">{{ store.isStaff ? '今天先处理这些' : '需要你跟进' }}</h2></div>
+      <div class="grid grid-cols-1 divide-y divide-line sm:grid-cols-2 sm:divide-y-0" :class="store.isStaff ? 'xl:grid-cols-4' : ''">
+        <button v-for="queue in queues" :key="queue.value" type="button" class="group flex items-center justify-between gap-4 px-5 py-5 text-left hover:bg-brand-50 focus-visible:bg-brand-50" @click="openQueue(queue.value)">
+          <span><span class="block text-[14px] font-medium text-ink-900">{{ queue.label }}</span><span class="mt-1 block text-xs text-ink-600">{{ queue.hint }}</span></span>
+          <span class="text-[28px] font-semibold text-brand-700">{{ overview.queues[queue.value] || 0 }}</span>
+        </button>
       </div>
-    </div>
-
-    <div class="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
-      <div class="isd-card xl:col-span-2">
-        <div class="flex items-center justify-between border-b border-line px-5 py-3.5">
-          <p class="m-0 text-[14px] font-medium text-ink-900">最近工单</p>
-          <button
-            type="button"
-            class="flex cursor-pointer items-center gap-0.5 text-[12px] text-brand-600 hover:text-brand-700"
-            @click="router.push({ name: 'tickets' })"
-          >
-            查看全部 <ArrowRight :size="13" />
-          </button>
-        </div>
-
-        <el-table
-          :data="recent"
-          class="isd-table"
-          style="width: 100%"
-          :show-header="true"
-          empty-text="暂无工单"
-          @row-click="openTicket"
-        >
-          <el-table-column prop="ticketNo" label="工单号" width="150" />
-          <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
-          <el-table-column label="状态" width="96">
-            <template #default="{ row }">
-              <StatusTag :status="row.status" size="small" />
-            </template>
-          </el-table-column>
-          <el-table-column label="优先级" width="90">
-            <template #default="{ row }">
-              <PriorityDot :priority="row.priority" />
-            </template>
-          </el-table-column>
-          <el-table-column prop="updatedAt" label="更新时间" width="160" />
+    </section>
+    <div class="mt-5 grid items-start gap-5 xl:grid-cols-3">
+      <section class="isd-card overflow-hidden xl:col-span-2">
+        <div class="flex justify-between border-b border-line px-5 py-4"><h2 class="m-0 text-[15px] font-semibold text-ink-900">最近工单</h2><button class="isd-text-action" @click="router.push({ name: 'tickets' })">查看全部</button></div>
+        <el-table :data="recent" class="isd-table" empty-text="暂无工单，可提交新的报障" @row-click="row => router.push({ name: 'ticket-detail', params: { id: row.id } })">
+          <el-table-column prop="title" label="问题" min-width="200" show-overflow-tooltip />
+          <el-table-column label="状态" width="110"><template #default="{ row }"><StatusTag :status="row.status" /></template></el-table-column>
+          <el-table-column label="优先级" width="90"><template #default="{ row }"><PriorityDot :priority="row.priority" /></template></el-table-column>
+          <el-table-column label="处理人" width="110"><template #default="{ row }">{{ row.assigneeName || '等待接单' }}</template></el-table-column>
         </el-table>
-      </div>
-
-      <div class="space-y-4">
-        <div class="isd-card p-5">
-          <p class="m-0 text-[14px] font-medium text-ink-900">快捷操作</p>
-          <div class="mt-3 space-y-2">
-            <button
-              type="button"
-              class="flex w-full cursor-pointer items-center justify-between rounded-md border border-line px-3 py-2.5 text-[13px] text-ink-900 transition hover:border-brand-500 hover:text-brand-600"
-              @click="router.push({ name: 'ticket-create' })"
-            >
-              提交新的故障工单
-              <ArrowRight :size="14" />
-            </button>
-            <button
-              type="button"
-              class="flex w-full cursor-pointer items-center justify-between rounded-md border border-line px-3 py-2.5 text-[13px] text-ink-900 transition hover:border-brand-500 hover:text-brand-600"
-              @click="router.push({ name: 'tickets' })"
-            >
-              {{ store.isStaff ? '进入工单池处理' : '查看我的工单' }}
-              <ArrowRight :size="14" />
-            </button>
-            <button
-              type="button"
-              class="flex w-full cursor-pointer items-center justify-between rounded-md border border-line px-3 py-2.5 text-[13px] text-ink-900 transition hover:border-brand-500 hover:text-brand-600"
-              @click="router.push({ name: 'kb' })"
-            >
-              检索知识库
-              <ArrowRight :size="14" />
-            </button>
-          </div>
-        </div>
-
-        <div class="isd-card bg-gradient-to-br from-[#111827] to-[#1f2937] p-5">
-          <p class="m-0 text-[13px] font-medium text-white">遇到问题先问 AI</p>
-          <p class="m-0 mt-1.5 text-[12px] leading-5 text-gray-400">
-            右下角的助手能查你名下工单的处理进展，也能按故障现象检索知识库条目。
-          </p>
-          <p class="m-0 mt-3 text-[11px] text-gray-500">AI 只有查询权限，不会替你创建或关闭工单。</p>
-        </div>
-      </div>
+      </section>
+      <section class="isd-card p-5">
+        <h2 class="m-0 text-[15px] font-semibold text-ink-900">{{ store.isStaff ? '服务效率' : '我的工单概览' }}</h2>
+        <dl class="mb-0 space-y-4 text-[13px]">
+          <div class="flex justify-between gap-2"><dt class="text-ink-600">首次响应平均用时</dt><dd class="m-0 font-medium">{{ formatDuration(overview.averageResponseSeconds) }}</dd></div>
+          <div class="flex justify-between gap-2"><dt class="text-ink-600">解决平均用时</dt><dd class="m-0 font-medium">{{ formatDuration(overview.averageResolutionSeconds) }}</dd></div>
+          <div class="flex justify-between gap-2"><dt class="text-ink-600">报障填写平均用时</dt><dd class="m-0 font-medium">{{ formatDuration(overview.averageFillDurationSeconds) }}</dd></div>
+          <div class="flex justify-between gap-2"><dt class="text-ink-600">工单重开率</dt><dd class="m-0 font-medium">{{ overview.reopenRate == null ? '暂无数据' : `${Math.round(overview.reopenRate * 100)}%` }}</dd></div>
+          <div class="flex justify-between gap-2"><dt class="text-ink-600">补充信息请求次数</dt><dd class="m-0 font-medium">{{ overview.informationRequests || 0 }}</dd></div>
+        </dl>
+        <template v-if="metrics">
+          <h3 class="mt-6 border-t border-line pt-4 text-[13px] font-medium text-ink-900">AI 使用反馈</h3>
+          <p class="text-xs leading-6 text-ink-600">收到 {{ metrics.feedbackCount }} 条反馈；有帮助 {{ rate(metrics.helpfulCount, metrics.helpfulFeedbackCount) }}；反馈已解决 {{ metrics.resolvedCount }} 次；建议采纳 {{ rate(metrics.suggestionAdoptedCount, metrics.suggestionCount) }}（{{ metrics.suggestionAdoptedCount || 0 }}/{{ metrics.suggestionCount || 0 }}）。</p>
+        </template>
+      </section>
     </div>
+    <section v-if="store.isAdmin" class="isd-card mt-5 overflow-hidden">
+      <h2 class="m-0 border-b border-line px-5 py-4 text-[15px] font-semibold text-ink-900">人员负荷与技能</h2>
+      <el-table :data="overview.supportWorkloads || []" class="isd-table" empty-text="暂无技术支持人员">
+        <el-table-column prop="name" label="技术支持" min-width="140" />
+        <el-table-column prop="activeTickets" label="在办工单" width="120" />
+        <el-table-column label="擅长分类" min-width="200"><template #default="{ row }">{{ row.skills?.map(skill => TICKET_CATEGORY[skill] || skill).join('、') || '尚未设置' }}</template></el-table-column>
+      </el-table>
+    </section>
   </div>
 </template>

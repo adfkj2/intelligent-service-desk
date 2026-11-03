@@ -45,6 +45,20 @@ class DataRetentionTest extends AbstractIntegrationTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
+    void expiredConversationsDeleteMessagesButPreserveRecentConversations() {
+        String oldId = java.util.UUID.randomUUID().toString();
+        String freshId = java.util.UUID.randomUUID().toString();
+        jdbcTemplate.update("INSERT INTO ai_conversation(id,user_id,purpose,access_role,updated_at) VALUES (?,990001,'CHAT','EMPLOYEE',?)", oldId, EXPIRED);
+        jdbcTemplate.update("INSERT INTO ai_conversation(id,user_id,purpose,access_role,updated_at) VALUES (?,990001,'CHAT','EMPLOYEE',?)", freshId, FRESH);
+        jdbcTemplate.update("INSERT INTO ai_conversation_message(conversation_id,role,content) VALUES (?,'user','old'),(?,'user','fresh')", oldId, freshId);
+        RetentionService.CleanupResult result = retentionService.cleanupAll();
+        assertThat(result.aiConversations()).isGreaterThanOrEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_conversation WHERE id=?", Integer.class, oldId)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_conversation_message WHERE conversation_id=?", Integer.class, oldId)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_conversation_message WHERE conversation_id=?", Integer.class, freshId)).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("AI 审计：只删超过保留期的记录，新记录保留")
     void deletesOnlyExpiredAiChatLogs() {
         insertAiLog("retention-old-1", EXPIRED);

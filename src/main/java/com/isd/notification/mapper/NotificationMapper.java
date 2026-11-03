@@ -15,6 +15,10 @@ import org.apache.ibatis.annotations.Update;
 @Mapper
 public interface NotificationMapper {
 
+    /** Re-evaluate the ticket's current visibility; delivery-time access can later be revoked. */
+    String VISIBLE = " AND (#{staff} = TRUE OR ticket_id IS NULL OR EXISTS "
+            + "(SELECT 1 FROM ticket t WHERE t.id = notification.ticket_id AND t.creator_id = #{userId}))";
+
     @Insert("""
             INSERT INTO notification (user_id, ticket_id, type, title, content, read_flag, event_id)
             VALUES (#{userId}, #{ticketId}, #{type}, #{title}, #{content}, 0, #{eventId})
@@ -26,20 +30,19 @@ public interface NotificationMapper {
             SELECT id, user_id, ticket_id, type, title, content, read_flag, event_id, created_at
             FROM notification
             WHERE user_id = #{userId}
-            ORDER BY id DESC
-            LIMIT #{limit}
-            """)
-    List<Notification> listByUser(@Param("userId") Long userId, @Param("limit") int limit);
+            """ + VISIBLE + " ORDER BY id DESC LIMIT #{limit}")
+    List<Notification> listByUser(@Param("userId") Long userId, @Param("limit") int limit,
+                                  @Param("staff") boolean staff);
 
-    @Select("SELECT COUNT(*) FROM notification WHERE user_id = #{userId} AND read_flag = 0")
-    long countUnread(@Param("userId") Long userId);
+    @Select("SELECT COUNT(*) FROM notification WHERE user_id = #{userId} AND read_flag = 0" + VISIBLE)
+    long countUnread(@Param("userId") Long userId, @Param("staff") boolean staff);
 
     /** 带上 user_id 条件：别人的通知不能被标记已读（返回 0 行由 Service 转 404） */
-    @Update("UPDATE notification SET read_flag = 1 WHERE id = #{id} AND user_id = #{userId}")
-    int markRead(@Param("id") Long id, @Param("userId") Long userId);
+    @Update("UPDATE notification SET read_flag = 1 WHERE id = #{id} AND user_id = #{userId}" + VISIBLE)
+    int markRead(@Param("id") Long id, @Param("userId") Long userId, @Param("staff") boolean staff);
 
-    @Update("UPDATE notification SET read_flag = 1 WHERE user_id = #{userId} AND read_flag = 0")
-    int markAllRead(@Param("userId") Long userId);
+    @Update("UPDATE notification SET read_flag = 1 WHERE user_id = #{userId} AND read_flag = 0" + VISIBLE)
+    int markAllRead(@Param("userId") Long userId, @Param("staff") boolean staff);
 
     /**
      * 保留策略：删除某个时间点之前、且已读的站内信。

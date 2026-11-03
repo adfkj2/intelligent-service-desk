@@ -1,16 +1,20 @@
 # Intelligent Service Desk (ISD)
 
 [![CI](https://github.com/adfkj2/intelligent-service-desk/actions/workflows/ci.yml/badge.svg)](https://github.com/adfkj2/intelligent-service-desk/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-92.01%25-brightgreen)](docs/release-checklist.md)
+[![Coverage](https://img.shields.io/badge/coverage-93.29%25-brightgreen)](docs/service-desk-upgrade.md)
 [![Version](https://img.shields.io/badge/version-v1.0.0-blue)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > **v1.0 发布门禁**：后端/前端/镜像/E2E/安全/性能/依赖/数字/版本/文档十条，逐条附命令与证据 →
 > [docs/release-checklist.md](docs/release-checklist.md)
 
-企业 IT 智能服务台：工单全流程管理 + 知识库 + 基于真实数据的只读 AI 助手。
+当前分支包含 v1.0 之后的协作与 AI 功能升级，更新记录见 [CHANGELOG.md](CHANGELOG.md) 的 Unreleased 部分；上方版本徽标指最近正式版本。
 
-面向"企业内网 IT 支持"场景：员工提交报障工单，技术支持接单处理，管理员指派与管人，AI 助手基于**当前登录用户自己的数据**回答问题，不执行任何写操作。
+企业 IT 智能服务台：工单协作、处理时限、知识审核，以及基于真实数据的 AI 辅助报障与处理。
+
+面向企业内网 IT 支持：员工描述问题并确认建单，技术支持在工单内沟通和处理，管理员查看积压与人员负荷。AI 基于**当前登录用户有权查看的数据**生成建议；采用草稿不会提交，业务操作仍需用户确认。
+
+本次升级的使用流程、接口、权限边界、处理时限和部署说明见 [工单协作与 AI 辅助使用说明](docs/service-desk-upgrade.md)。
 
 ---
 
@@ -19,12 +23,13 @@
 | 模块 | 能力 |
 |---|---|
 | 认证与权限 | 注册 / 登录 / 注销（Session Cookie）、BCrypt 密码哈希、三角色 RBAC（EMPLOYEE / SUPPORT / ADMIN）、资源级访问控制、**会话外置 Redis（多实例踢人一致）** |
-| 工单 | 创建（**Idempotency-Key 幂等**）、分页多条件查询、详情、接单、指派、状态流转、操作历史（审计）、**并发接单保护（乐观锁）** |
-| 知识库 | 分类管理、条目 CRUD（创建者本人或管理员才能改删）、关键词检索、**FULLTEXT ngram 全文检索**、分页列表 |
-| AI 助手 | DeepSeek（OpenAI 兼容协议）+ Function Calling，两个只读工具：查当前用户工单、检索知识库；**RAG：先全文召回再拼提示词**；超时/异常自动降级为知识库检索；**每次问答落审计表** |
+| 工单 | 幂等创建、接单／指派／转派、公开回复与内部备注、附件上传及受控下载、待补充与恢复、已解决工单重开、操作审计与乐观锁；列表增加处理人、优先级、时间和快捷队列 |
+| 工作台与时限 | 按角色展示待办、积压与人员负荷，记录填写／响应／解决用时和重开率；按优先级计算首次响应及解决期限，等待补充暂停解决计时，临期提醒和超时升级去重投递；按技能和工作量推荐处理人 |
+| 知识库 | 分类与条目维护、关键词／全文检索；已解决工单整理为独立草稿，人工审核后发布；版本冲突保护、重复发布幂等、适用环境、复核日期和有效性反馈 |
+| AI 助手 | DeepSeek + 只读 Function Calling + RAG；智能建单草稿及缺失信息追问、服务端多轮会话、当前工单上下文、处理摘要／回复草稿／相似解决案例、可点击原文和相关片段、采纳与解决反馈；超时／无效 JSON／未配置模型均可降级 |
 | 站内信 | 接单 / 指派 / 状态变更自动通知相关人（**Transactional Outbox**：事件与业务同事务落库，调度器异步投递）；多实例靠 `(event_id, user_id)` 唯一索引幂等、重试有上限转 `FAILED`；未读数、单条/全部已读（越权 404） |
-| 管理台 | Vue 3 + Vite 桌面前端：工作台统计、工单列表/详情/新建、知识库、用户管理、**消息铃铛（未读数 + 下拉列表）**、全局 AI 抽屉；按角色显示菜单，构建产物打进同一个 jar |
-| 工程 | 统一响应与全局异常、参数校验、Springdoc 在线接口文档、Flyway 版本化迁移、Testcontainers 测试库、GitHub Actions、Micrometer 指标与 traceId 日志、**登录失败限流（Redis）**、**AI 配额限流（用户/IP 双维度）**、**数据保留清理（定时分批删除）**、**CSRF 双提交防护**、**生产 CSP**、105 个自动化测试（含并发冲突与幂等用例）+ 真实浏览器 E2E |
+| 管理台 | Vue 3 + Vite 响应式前端：角色工作台、工单协作、知识审核、用户管理、消息铃铛与按工单隔离的 AI 抽屉；构建产物打进同一个 jar |
+| 工程 | 参数校验、OpenAPI、Flyway、Testcontainers、GitHub Actions、Micrometer、traceId、Redis 登录／AI 配额限流、保留清理、CSRF 与生产 CSP；自动化回归包含并发、幂等、权限变化和真实浏览器流程 |
 
 ---
 
@@ -45,7 +50,7 @@
 | Redis | 7.4（`docker compose`） | 会话共享存储；本地容器名 `isd-redis` |
 | springdoc-openapi | 2.8.9 | Swagger UI |
 | 前端 | Vue 3.5 + Vite 5 + Element Plus 2.9 + Pinia + Tailwind | 独立 `web/` 工程，`npm run build` 产出到 `src/main/resources/static` |
-| 测试 | JUnit 5 + MockMvc + AssertJ + Playwright | 105 个后端用例 + 1 条 E2E 主流程 |
+| 测试 | JUnit 5 + MockMvc + AssertJ + Playwright | 后端回归、前端交互测试、真实服务与模拟接口浏览器流程 |
 
 ---
 
@@ -72,7 +77,7 @@
 - 老库：首次启动以 `baseline-version: 1` 打基线，不会重复建表，也不影响已有数据；V2 之后的增量迁移会照常执行；
 - 改结构：新增 `V7__xxx.sql` 之类的迁移，**不要改已执行过的旧脚本**（校验和会变，Flyway 会拒绝启动）。
 
-现有 6 个迁移、8 张业务表：
+现有 11 个迁移、17 张业务表：
 
 | 版本 | 内容 |
 |---|---|
@@ -82,6 +87,11 @@
 | `V4__ai_chat_log.sql` | `ai_chat_log`（AI 问答审计） |
 | `V5__outbox_and_notification.sql` | `outbox_event`、`notification`（Transactional Outbox + 站内信） |
 | `V6__retention_indexes.sql` | `ai_chat_log`、`notification` 的清理索引（保留策略按时间分批删） |
+| `V7__ticket_collaboration.sql` | 回复、附件、技能、时限提醒去重与工单协作字段 |
+| `V8__ai_conversations.sql` | AI 会话、最近消息和回答反馈 |
+| `V9__knowledge_review_workflow.sql` | 独立知识草稿、适用环境、审核与条目反馈 |
+| `V10__ai_conversation_retention.sql` | AI 会话保留清理索引；会话与消息默认保留 90 天 |
+| `V11__ai_suggestion_metrics.sql` | 区分普通问答与实际生成的草稿／处理建议，计算建议采纳率 |
 
 外加 Flyway 自己的 `flyway_schema_history`。
 
@@ -116,7 +126,7 @@ npm run dev
 
 # 质量门禁（CI 里与 lint 同级阻断）
 npm run lint       # ESLint 9 flat config，--max-warnings=0
-npm test           # Vitest + Vue Test Utils（jsdom），25 个单测
+npm test           # Vitest + Vue Test Utils（jsdom），30 个单测
 npm run test:coverage   # 额外产出覆盖率报告到 web/coverage/
 ```
 
@@ -162,7 +172,7 @@ curl http://localhost:8081/api/ping
 
 ### 7. 创建技术支持 / 管理员
 
-注册接口固定给 EMPLOYEE 角色（防提权）。新账号注册后，由**已有管理员**在「用户管理」页点角色列的「调整」，选择技术支持或管理员即可；对方重新登录后生效。
+注册接口固定给 EMPLOYEE 角色（防提权）。新账号注册后，由**已有管理员**在「用户管理」页调整角色。角色变更或禁用提交后，系统立即失效目标用户的旧登录会话；角色变更后需重新登录，禁用账号无法登录。
 
 第一次从零启动时还没有管理员，先用 SQL 提权一个（之后就可以全在页面上操作）：
 
@@ -189,7 +199,7 @@ UPDATE sys_user SET role = 'ADMIN' WHERE username = 'demo_admin';
 
 > 三个 compose 文件是**三个独立项目**（项目名分别是 `intelligentservicedesk` / `isd-stack` / `isd-prod`），容器名与端口互不冲突：开发依赖那个只占用 6379，全栈栈只占用 8081，生产向只占用 80/443。技术上可以同时起，但没必要——同时跑两套 Redis 只是平白多占内存，实际使用时挑一种即可。
 
-全栈栈包含三个服务：`mysql`（8.0.36，数据卷 `isd-mysql-data`）、`redis`（7.4，开启 `notify-keyspace-events`）、`app`（本仓库 `Dockerfile` 构建，`8081:8081`）。`app` 用 `depends_on: service_healthy` 等两个依赖真的可用再启动，Flyway 随后自动建库建表（8 张业务表）。
+全栈栈包含三个服务：`mysql`（8.0.36，数据卷 `isd-mysql-data`）、`redis`（7.4，开启 `notify-keyspace-events`）、`app`（本仓库 `Dockerfile` 构建，`8081:8081`）。`app` 用 `depends_on: service_healthy` 等依赖就绪，Flyway 随后自动建库建表。数据库会话和业务计算统一使用上海时间，避免 UTC 数据库宿主导致时限偏移。
 
 ```bash
 docker compose -f docker-compose.stack.yml up -d --build
@@ -252,7 +262,7 @@ docker compose -f docker-compose.prod.yml down
 |---|---|:---:|:---:|:---:|
 | 登录 / 注册（含“忘记密码”管理员联系方式） | `/login` | ✓ | ✓ | ✓ |
 | 修改密码（重置后强制进入） | `/change-password` | ✓ | ✓ | ✓ |
-| 工作台（4 张状态卡 + 最近工单） | `/` | ✓ 仅本人 | ✓ 全量 | ✓ 全量 |
+| 工作台（角色待办 + 服务效率 + 最近工单） | `/` | ✓ 仅本人 | ✓ 全量 | ✓ 全量 + 人员负荷 |
 | 工单列表（筛选 + 服务端分页） | `/tickets` | ✓ 仅本人 | ✓ 工单池 | ✓ 工单池 |
 | 新建工单 | `/tickets/create` | ✓ | ✓ | ✓ |
 | 工单详情（时间线 + 接单/指派/解决/关闭） | `/tickets/:id` | ✓ | ✓ | ✓ |
@@ -280,7 +290,7 @@ docker compose -f docker-compose.prod.yml down
 
 统一响应：`{"code": 0, "message": "OK", "data": ...}`，HTTP 状态码保留 2xx/400/401/403/404/409/429/500 语义。
 
-共 **33** 个 `/api` 接口。清单由 `ApiInventoryTest` 与 `src/test/resources/api-endpoints.txt` 逐行守护——增删接口没同步文档时 CI 会直接失败。
+共 **55** 个 `/api` 接口。完整清单由 `ApiInventoryTest` 与 `src/test/resources/api-endpoints.txt` 逐行守护。下表保留原有接口，新增加的协作、AI、分派和知识审核接口见 [升级接口说明](docs/service-desk-upgrade.md#新增接口)。
 
 | 模块 | 方法 | 路径 | 权限 |
 |---|---|---|---|
@@ -391,7 +401,7 @@ web/                   前端工程（独立 npm 包，构建产物回灌 src/ma
 ├── vitest.config.js   单测配置（jsdom + Vue Test Utils，与构建配置解耦）
 ├── playwright.config.js  E2E 配置（https + ignoreHTTPSErrors + 单 worker + trace）
 ├── e2e/               seed.sql（固定 BCrypt 哈希）+ 主流程用例 + 登录/登出辅助
-├── tests/             25 个单测：请求拦截器、会话 store、回跳校验、通知铃铛
+├── tests/             请求拦截器、会话、回跳、通知、AI 草稿／引用与知识发布交互测试
 ├── src/api/           axios 实例（解包 data、统一 401/403/409）
 ├── src/router/        history 模式 + 登录守卫 + 角色路由
 ├── src/stores/        会话用户（只存身份，不存 token）
@@ -441,12 +451,13 @@ CI 会统计 `@Test` 数量并与这里的「后端用例」比对，不一致�
 
 | 项 | 数字 |
 |---|---|
-| 后端用例 | 105 |
-| 前端单测 | 25 |
-| JaCoCo 行覆盖 | 92.01%（门禁 ≥ 90%） |
-| `/api` 接口 | 33 |
-| Flyway 迁移 | 6 |
-| 业务表 | 8 |
+| 后端用例 | 168 |
+| 前端单测 | 30 |
+| JaCoCo 行覆盖 | 93.29%（门禁 ≥ 90%） |
+| `/api` 接口 | 55 |
+| Flyway 迁移 | 11 |
+| 业务表 | 17 |
+| 浏览器 E2E | 6（2 条真实服务流程 + 4 条模拟接口流程） |
 
 ---
 
@@ -457,7 +468,7 @@ CI 会统计 `@Test` 数量并与这里的「后端用例」比对，不一致�
 ./mvnw verify    # 测试 + 覆盖率报告与门禁（报告在 target/site/jacoco/index.html）
 ```
 
-覆盖率门禁：JaCoCo **行覆盖 ≥ 90%**（实测基线 92.01%，分支 71.79%），不达标 `./mvnw verify` 直接失败，报告随 CI 产物可下载。
+覆盖率门禁：JaCoCo **行覆盖 ≥ 90%**，不达标 `./mvnw verify` 直接失败，最新实测见上方关键数字，报告随 CI 产物可下载。
 
 另有性能验证：k6 脚本压工单读路径与 AI 配额，阈值写死在脚本里（列表 p95 < 300ms、详情 p95 < 200ms、AI 5xx == 0），跑不过即失败。实测数据与瓶颈分析见 [docs/perf-report.md](docs/perf-report.md)；CI 里以 5 VU / 5s 冒烟跑同一套阈值。
 
@@ -469,7 +480,7 @@ docker compose -f docker-compose.prod.yml exec -T mysql mysql -uroot -p123456 is
 cd web && npx playwright install --with-deps chromium && npx playwright test
 ```
 
-一条主流程覆盖登录 → 建单 → 接单 → 解决 → 关闭，并同时断言 CSP 响应头存在、页面无 CSP 违规；失败保留 trace。
+真实服务测试覆盖登录 → 建单 → 接单 → 解决 → 关闭，以及智能草稿确认、回复／附件、内部隔离、待补充恢复、重开和知识审核发布。另有四条模拟接口浏览器场景验证引用跳转、版本与窄屏布局；失败保留 trace。
 
 | 测试类 | 用例数 | 覆盖内容 |
 |---|---|---|
@@ -481,25 +492,33 @@ cd web && npx playwright install --with-deps chromium && npx playwright test
 | `PasswordFlowTest` | 6 | 重置密码、旧会话失效、临时密码强制改密、强制改密态的退出/联系方式、公开联系方式、清空联系方式校验 |
 | `LoginRateLimitTest` | 3 | 连错 5 次锁定（第 6 次正确密码也 429）、成功登录清零计数、IP 维度独立锁定 |
 | `UserRoleConcurrencyTest` | 2 | 并发改同一用户角色（version 只加 1）、过期 version 更新被拒 |
-| `SchemaMigrationTest` | 1 | Flyway 已应用 V1~V6、全部业务表与关键索引（幂等键、全文索引、`uk_event_user`、清理索引）齐全 |
+| `SchemaMigrationTest` | 1 | Flyway 已应用 V1~V11、全部业务表与关键索引齐全 |
 | `ApiInventoryTest` | 1 | `/api` 路由清单与快照逐行比对，接口增删未同步文档时 CI 失败 |
-| `NotificationApiTest` | 5 | 只返回本人通知、未读数、标记已读、越权 404 且数据不变、全部已读不波及他人 |
+| `NotificationApiTest` | 7 | 本人通知、已读、越权、降权后旧指派／超时通知隔离 |
 | `NotificationRelayTest` | 2 | 同一事件重复投递只落一条（唯一索引兜底）、坏 payload 重试到上限转 `FAILED` |
 | `TraceIdFilterTest` | 3 | traceId 生成、合法值透传、非法/超长值丢弃 |
 | `MetricsApiTest` | 1 | 登录失败与 URL 级越权各计一次数（差值断言） |
 | `AiRateLimitTest` | 3 | 用户维度第 3 次 429 且不触发模型调用、IP 维度独立拦截、关闭开关后放行 |
-| `DataRetentionTest` | 3 | 只删过期 AI 审计 / 过期 `SENT` / 过期已读通知，`PENDING`、`FAILED`、未读、未过期全部保留 |
+| `DataRetentionTest` | 4 | 过期 AI 审计／会话及消息、已投递事件、已读通知清理；未过期及未消费内容保留 |
 | `KbApiTest` | 7 | 分类/条目 CRUD、归属权限、检索、通配符转义、OpenAPI 可达 |
 | `AiAgentTest` | 5 | 模型正常/异常/空回答降级、参数校验、未登录 |
 | `AiNotConfiguredTest` | 1 | 未配置 Key 时直接降级，且不发起模型调用（`verifyNoInteractions`） |
 | `AiTimeoutTest` | 1 | 模型超时触发降级 |
 | `AiToolsTest` | 4 | 工具只返回本人数据、未登录即失败、状态过滤 |
-| `AiRagTest` | 3 | 召回内容进入提示词、审计字段与真实分支一致、未命中不硬塞上下文 |
+| `AiRagTest` | 5 | 召回与工具来源可追溯、适用环境／复核提示、审计字段与实际分支一致 |
 | `SessionRedisTest` | 2 | 会话真的落在 Redis、重置密码删光该账号全部会话、本人改密只保留当前会话 |
 | `CsrfProtectionTest` | 6 | 首个 GET 即下发 `XSRF-TOKEN`、缺 token 403、Cookie 与头不一致 403、只读不受影响、带 token 的注册→登录→建单全链路 |
 | `SecurityHeadersTest` | 3 | CSP 开启后下发且不含 `unsafe-eval`、样式保留 `unsafe-inline`、默认（开发期）不下发 |
+| `TicketCollaborationServiceTest` | 21 | 协作权限、时限暂停、附件限制、转派、分派理由、提醒去重与 UTC 宿主回归 |
+| `TicketCollaborationApiTest` | 5 | 真实数据库下的回复／内部隔离、附件下载、补充／重开、队列及提醒事件 |
+| `AiWorkspaceApiTest` | 11 | 多轮与角色隔离、上下文权限、缺失信息追问、无效 JSON、采纳率口径及无隐式写入 |
+| `AiSuggestionAuditTest` | 3 | 建议统计标记的审计失败、并发失败及空审计 ID 边界 |
+| `AgentSnippetTest` | 4 | 长文相关片段、引用去重与上下文清理、知识复核元数据 |
+| `KnowledgeWorkflowTest` | 7 | 草稿隔离、生成期间重开、旧待审草稿、版本冲突、并发重复发布与反馈 |
+| `AccessChangeSessionTest` / `UserAccessChangeTransactionTest` | 6 | 真实 Cookie／Redis 权限失效、旧高权限 AI 会话隔离、提交／回滚与幂等 |
+| `BusinessTimeTest` | 1 | 业务时间不随宿主默认时区变化 |
 
-合计 **105** 个用例。并发用例刻意不加 `@Transactional`——事务是连接级的，两个线程各自提交才能测出真实冲突；指标断言一律用**差值**，因为 Spring 上下文复用、计数器不会在测试之间清零。
+新增协作、AI 会话与结构化建议、知识审核、时区和权限失效回归；用例总数见上方关键数字。并发用例刻意不加 `@Transactional`——事务是连接级的，两个线程各自提交才能测出真实冲突；指标断言使用差值，避免上下文复用造成干扰。
 
 > `AiRagTest` 也不能加 `@Transactional`：InnoDB 的全文索引在行提交后才进入检索视图，
 > 测试事务里的种子数据永远查不到，会得到"召回永远为空"的假阴性。改为 `itest-` 前缀 + `@AfterEach` 手工清理。
@@ -511,8 +530,8 @@ cd web && npx playwright install --with-deps chromium && npx playwright test
 
 CI 在 `.github/workflows/ci.yml`，五个 job 都是硬门禁（相互并行，任一失败即红）：
 
-- **后端**：`./mvnw verify`（runner 自带 Docker，固定走容器模式），一次覆盖编译、105 个用例、JaCoCo 覆盖率检查与打 jar；随后统计 `@Test` 数与 README「关键数字」比对，加用例没同步文档会失败；失败的 surefire 报告和每次都生成的 `target/site/jacoco/` 都会作为产物上传；
-- **前端**：`npm ci` → `npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org` → `npm run lint`（ESLint 9 flat config，未定义变量、`v-for` 缺 `:key` 这类真问题为 error）→ `npm test`（Vitest，25 个单测）→ `npm run build`；
+- **后端**：`./mvnw verify`（runner 自带 Docker，固定走容器模式），覆盖编译、全部回归、JaCoCo 门禁与打包；随后统计 `@Test` 数与关键数字比对，报告作为 CI 产物上传；
+- **前端**：`npm ci` → `npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org` → `npm run lint` → `npm test` → `npm run build`；
 - **镜像**：`docker build`（不推送），专门拦住「只在本地机器能构建」的退化——缺文件、依赖本机 `static/`、忘写 `.dockerignore` 都会在这一步暴露；
 - **E2E**：生成自签证书 → `docker compose -f docker-compose.prod.yml up -d --build` → 灌 `web/e2e/seed.sql` → Playwright Chromium 跑主流程；报告与 trace 无论成败都上传；
 - **压测**：起 `docker-compose.stack.yml` → `grafana/k6` 跑工单读路径与 AI 配额冒烟（5 VU / 5s），阈值与完整压测完全一致，跑不过即失败。
@@ -525,13 +544,14 @@ CI 在 `.github/workflows/ci.yml`，五个 job 都是硬门禁（相互并行，
 
 - 列表页检索仍是 `LIKE '%kw%'`（无法走索引）；RAG 召回已换 FULLTEXT ngram，但没有语义召回（同义词、跨语言查不到）
 - 知识库分类不支持改/删，条目为硬删除
-- AI 单轮无会话记忆；降级只返回标题，不返回正文片段
+- AI 会话保留最近十条消息；语义召回尚未引入。真实回答质量仍需结合企业知识与用户反馈持续评估，自动化测试使用可重复的模拟模型结果
 - AI 限流是固定窗口：窗口边界可能瞬时放行接近两倍配额（换来实现与排查的简单）；配额按节点共享 Redis，Redis 故障时 AI 接口会随会话一起不可用
 - 登录限流按 IP 20 次的阈值对 NAT 环境偏严，企业出口 IP 集中时要按实际调大或改成网关注入的可信头
 - 幂等键只在"同一用户 + 同一 key"下生效，key 由前端页面生成，没有做服务端过期回收（靠唯一索引长期占用存储可忽略的空间）
 - CSRF 用 Cookie 双提交（`XSRF-TOKEN` + `X-XSRF-TOKEN`）：token 必须可被 JS 读取（不能设 HttpOnly），因此一旦出现 XSS，CSRF 这层就失效——兜底靠 CSP 与输出转义。CSP 只在 prod profile 下发（开发期 Vite HMR / Swagger UI 需要 eval 与内联脚本），且 `style-src` 保留 `'unsafe-inline'` 以兼容 Element Plus 弹层定位；`script-src` 仍是 `'self'`
 - 工单号仍是"日期 + 4 位随机数 + 重试"，未换雪花/序列
-- 前端 25 个单测覆盖请求拦截器、会话 store、回跳校验与通知铃铛；页面级只有 1 条 E2E 主流程（建单→接单→解决→关闭），视觉回归与各页面边界态仍靠手工验收
+- 处理时限使用连续自然小时，暂不支持工作日／节假日日历；分派依据分类技能与在办量推荐，用户确认后生效
+- 附件存入数据库，每个不超过 5 MB，每张工单最多 20 个，备份与容量管理需包含附件数据
 - Element Plus 全量引入（主包 gzip 约 410KB），内网可接受；按需引入留作优化项
 - CI 压测是 5 VU / 5s 冒烟（约 1 分钟），只缩小并发、时长与种子数据量，阈值与完整压测一致；完整报告仍需本地按 `docs/perf-report.md` 复现
 - 依赖风险靠 Dependabot + `npm audit --audit-level=high`：OWASP dependency-check 未接入（需要 NVD API Key，首跑十分钟以上），Java 侧传递依赖的 CVE 暂时只能靠人工看 Dependabot
@@ -542,6 +562,7 @@ CI 在 `.github/workflows/ci.yml`，五个 job 都是硬门禁（相互并行，
 
 ## 文档
 
+- [docs/service-desk-upgrade.md](docs/service-desk-upgrade.md) 工单协作、智能报障、处理助手、时限与知识审核使用说明
 - [docs/release-checklist.md](docs/release-checklist.md) v1.0 发布门禁（十条 DoD，逐条命令与证据）
 - [docs/architecture.md](docs/architecture.md) 架构与关键取舍（ADR）
 - [docs/demo-script.md](docs/demo-script.md) 5 分钟演示脚本（含实测结果）

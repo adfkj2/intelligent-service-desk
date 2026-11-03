@@ -15,7 +15,7 @@
         知识沉淀（知识库）→ AI 助手基于真实数据回答
 ```
 
-**明确不做**（v1）：多租户、SLA 计时、附件上传、站内通知、审批流、消息队列、微服务拆分。
+初始 v1 的边界不包含协作附件和时限管理；当前升级已加入回复／内部备注、附件、待补充／重开、处理时限、站内通知和知识审核，详见 [升级说明](service-desk-upgrade.md)。多租户、审批流、独立消息队列和微服务拆分仍未引入。
 
 AI 的边界尤其重要：**只读 + 建议**。模型能查工单、查知识库，不能创建/接单/关闭——不是通过提示词"请求"它别做，而是**根本没有对应的工具**。
 
@@ -121,7 +121,7 @@ Vue Router 用 history 模式，URL 是 `/tickets/12` 这种可读路径。用�
 - **理由**：
   1. 单体、无多端诉求，Session 是安全默认值：注销即失效、服务端可随时踢人；
   2. JWT 需要自己解决"如何注销""如何续期""如何吊销"，本质是把 Session 的复杂度搬到了自己手里；
-  3. 角色变更在 Session 下"重新登录即生效"，JWT 则要等 token 过期。
+  3. 角色变更或禁用在数据库提交后立即删除目标用户的 Redis 会话，避免旧权限持续生效。
 - **细节**：手工登录必须自己 `securityContextRepository.saveContext(...)`（Spring Security 6 默认 `requireExplicitSave`），并调用 `changeSessionId()` 防会话固定攻击。
 - **落地：会话已外置到 Redis（P0-1）**。触发点是"重置密码后踢人"：内存 `SessionRegistryImpl` 只掌握本机会话，多实例部署时另一台上被重置的账号仍能继续用旧会话。
   - 选型：`spring-session-data-redis` + `repository-type: indexed`。**indexed 是刚需而不是优化**——只有索引版仓库会维护 `principal name -> sessionId` 的 Set；Boot 3.5 默认的 `default` 仓库没有这个索引，`findByPrincipalName` 不可用，按用户找会话只能全库 `SCAN`。
@@ -222,7 +222,7 @@ WHERE id=? AND status='OPEN' AND version=?
 
 1. **幂等**。两个人把角色设成同一个值时，后到的那个应成功而不是 409：条件更新失败后用**加锁读**（`FOR UPDATE`）拿最新已提交值再判断，普通 SELECT 在 REPEATABLE READ 下还是旧快照。
 2. **加锁顺序**。按 `id` 排序加锁，避免 A 锁 B、B 锁 A 的循环等待；`idx_role_status` 让加锁范围可控。
-3. **会话不会自动失效**。角色存在 Session 里，改完必须对方重新登录才生效。`SessionRevoker` 只用在"重置密码后踢人"（ADR-12），没有顺带在改角色时踢——避免一次误操作把对方正在填的表单全部清空。
+3. **权限变更立即失效旧会话**。角色变化或禁用提交成功后，`SessionRevoker` 通过 Redis principal 索引删除目标用户所有会话；事务回滚不踢人，相同角色／状态的幂等操作不踢人。AI 会话还记录创建时角色，降权后重新登录也不能继续读取原高权限会话。
 
 ### ADR-12 密码重置与强制改密：一次性临时密码 + 服务端拦截
 

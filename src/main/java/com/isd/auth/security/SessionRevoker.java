@@ -48,6 +48,11 @@ public class SessionRevoker {
         return revoke(username, null, "password_reset");
     }
 
+    /** Role changes and disabling take effect in every browser after the database commit. */
+    public int revokeAccessChanged(String username) {
+        return revoke(username, null, "access_changed");
+    }
+
     /** 失效某个用户除当前会话外的其他会话（本人改密时用） */
     public int revokeOthers(String username, String keepSessionId) {
         return revoke(username, keepSessionId, "password_changed");

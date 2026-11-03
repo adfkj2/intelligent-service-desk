@@ -4,6 +4,8 @@ import java.util.List;
 
 import com.isd.ai.client.LlmClient;
 import com.isd.ai.tools.ToolCallContext;
+import com.isd.ai.tools.KnowledgeTools;
+import com.isd.common.time.BusinessTime;
 import com.isd.auth.security.LoginUser;
 import com.isd.support.AbstractIntegrationTest;
 import com.isd.support.TestUsers;
@@ -61,6 +63,9 @@ class AiRagTest extends AbstractIntegrationTest {
     @Autowired
     private MeterRegistry meterRegistry;
 
+    @Autowired
+    private KnowledgeTools knowledgeTools;
+
     @MockitoBean
     private LlmClient llmClient;
 
@@ -105,6 +110,9 @@ class AiRagTest extends AbstractIntegrationTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.source").value("LLM"))
+                .andExpect(jsonPath("$.data.references[0].id").isNumber())
+                .andExpect(jsonPath("$.data.references[0].excerpt").value(containsString("检查电源与网线")))
+                .andExpect(jsonPath("$.data.answerId").isNumber())
                 .andExpect(jsonPath("$.data.relatedTitles", hasItem(KB_TITLE)));
 
         assertThat(promptCaptor.getValue())
@@ -162,6 +170,60 @@ class AiRagTest extends AbstractIntegrationTest {
         assertThat(promptCaptor.getValue()).isEqualTo("zzz 完全不相关的查询 xyz");
         assertThat(intColumn(latestLogId(), "kb_hits")).isZero();
         assertThat(retrievalCount("miss")).isEqualTo(missBefore + 1);
+    }
+
+    @Test
+    @DisplayName("初次召回未命中，工具查到的真实知识仍作为可点击来源返回")
+    void toolDiscoveredSourcesRemainTraceable() throws Exception {
+        jdbcTemplate.update("UPDATE kb_item SET environment=?,review_due_at=? WHERE title=?",
+                "Windows 11，企业打印驱动v3", BusinessTime.now().minusDays(1), KB_TITLE);
+        when(llmClient.chat(anyString())).thenAnswer(invocation -> {
+            assertThat(knowledgeTools.searchKnowledgeBase("打印机"))
+                    .anySatisfy(item -> {
+                        assertThat(item.excerpt()).contains("检查电源与网线");
+                        assertThat(item.environment()).isEqualTo("Windows 11，企业打印驱动v3");
+                        assertThat(item.reviewRequired()).isTrue();
+                        assertThat(item.reviewDueAt()).isBefore(BusinessTime.now());
+                    });
+            return "请参考打印机离线处理步骤核对电源与网线。";
+        });
+        mockMvc.perform(post("/api/ai/chat").with(user(EMPLOYEE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"zzz 不相关 xyz\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.relatedTitles", hasItem(KB_TITLE)))
+                .andExpect(jsonPath("$.data.references[0].id").isNumber())
+                .andExpect(jsonPath("$.data.references[0].environment").value("Windows 11，企业打印驱动v3"))
+                .andExpect(jsonPath("$.data.references[0].reviewRequired").value(true))
+                .andExpect(jsonPath("$.data.references[0].reviewDueAt").isString())
+                .andExpect(jsonPath("$.data.references[0].excerpt").value(containsString("检查电源与网线")));
+        assertThat(intColumn(latestLogId(), "tool_calls")).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("知识适用环境与复核期限进入提示词和引用，过期只提醒核实而不屏蔽资料")
+    void reviewMetadataTravelsWithRetrievedKnowledge() throws Exception {
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        when(llmClient.chat(prompt.capture())).thenReturn("该知识需要复核，请先核实当前环境与步骤仍适用。");
+        jdbcTemplate.update("UPDATE kb_item SET environment=?,review_due_at=? WHERE title=?",
+                "Windows 11，企业打印驱动v3", BusinessTime.now().minusDays(1), KB_TITLE);
+        mockMvc.perform(post("/api/ai/chat").with(user(EMPLOYEE)).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"打印机离线怎么办\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.references[0].reviewRequired").value(true))
+                .andExpect(jsonPath("$.data.references[0].environment").value("Windows 11，企业打印驱动v3"));
+        assertThat(prompt.getValue()).contains("Windows 11，企业打印驱动v3", "已超过复核期限", "需要核实有效性");
+
+        jdbcTemplate.update("UPDATE kb_item SET review_due_at=? WHERE title=?", BusinessTime.now().plusDays(2), KB_TITLE);
+        mockMvc.perform(post("/api/ai/chat").with(user(EMPLOYEE)).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"打印机离线怎么办\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.references[0].reviewRequired").value(false));
+        assertThat(prompt.getValue()).contains("复核期限：").doesNotContain("已超过复核期限");
+
+        jdbcTemplate.update("UPDATE kb_item SET environment=NULL,review_due_at=NULL WHERE title=?", KB_TITLE);
+        mockMvc.perform(post("/api/ai/chat").with(user(EMPLOYEE)).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"打印机离线怎么办\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.references[0].reviewRequired").value(false));
+        assertThat(prompt.getValue()).contains("未标注，应用前需确认环境是否匹配").doesNotContain("已超过复核期限");
     }
 
     private Long firstId(String sql, String arg) {
